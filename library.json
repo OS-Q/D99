@@ -1,0 +1,14 @@
+{
+  "name": "access",
+  "keywords": "rfid,nfc,Wiegand",
+  "description": "Read rfid card",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/OS-Q/D94.git"
+  },
+  "version": "1.0.0",
+  "exclude": "doc",
+  "frameworks": "arduino",
+  "platforms": ["atmelavr", "ststm32", "espressif8266","espressif32","samd"]
+}
