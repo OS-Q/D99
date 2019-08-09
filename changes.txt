@@ -1,4 +1,0 @@
--- Add changes to unreleased tag until we make a release.
-
-2019 8-2
-- Initial commit to GitHub.
