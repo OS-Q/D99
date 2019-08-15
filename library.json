@@ -1,19 +1,17 @@
 {
-  "name": "rf",
-  "keywords": "rf,rfid,nfc,Wiegand",
-  "authors":
-  {
+  "name":"radio",
+  "description":"radio",
+  "keywords":"rf,rfid,nfc",
+  "version": "1.0.0",
+  "authors": {
     "name":  "qitas",
     "email": "qitas@qitas.cn",
-     "url": "http://tang.qitas.cn"
+    "url": "http://tang.qitas.cn"
   },
-  "description": "rf",
-  "repository":
-  {
+  "repository": {
     "type": "git",
-    "url": "https://github.com/OS-Q/D94.git"
+    "url": "https://github.com/OS-Q/D104.git"
   },
-  "version": "1.0.0",
   "frameworks": "arduino",
-  "platforms": ["ststm32", "espressif8266","espressif32","samd"]
+  "platforms":"espressif,esp8266,esp32"
 }
