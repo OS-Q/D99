@@ -1,7 +1,3 @@
-/**
- * Copyright (c) 2016 by Ludwig Grill (www.rotzbua.de)
- * Throws error if c++11 is not supported
- */
 #ifndef REQUIRE_CPP11_H
 #define REQUIRE_CPP11_H
 
