@@ -56,7 +56,7 @@ void setup() {
   mfrc522.PCD_Init(); // Init MFRC522 card
 
   /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
-  Serial.print(F("Ver: 0x"));
+  Serial.print(F("MFRC522 Ver: 0x"));
   byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
   Serial.println(readReg, HEX);
 
@@ -73,8 +73,8 @@ void setup() {
   bNewInt = false; //interrupt flag
 
   /*Activate the interrupt*/
-  attachInterrupt(IRQ_PIN, readCard, FALLING);
-  //attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
+  //attachInterrupt(IRQ_PIN, readCard, FALLING);
+  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
 
   do { //clear a spourious interrupt at start
     ;
