@@ -1,8 +1,7 @@
-#include <SoftwareSerial.h>
 #include <RDM6300.h>
 
-#define RFID_RX_PIN 5
-#define RFID_TX_PIN 4
+#define RFID_RX_PIN 13
+#define RFID_TX_PIN 15
 
 RDM6300 RDM(RFID_RX_PIN, RFID_TX_PIN);
 
@@ -16,8 +15,6 @@ void setup() {
 
 void loop() {
   if(RDM.isIdUartAvailable()) {
-    //tag = RDM.readId();
-    Serial.print("isIdUartAvailable");
     Serial.println(RDM.realTagString);
   }
   if(RDM.isIdAvailable()) {
