@@ -1,5 +1,5 @@
 
-#include <SoftwareSerial.h>
+#include <ESP12Serial.h>
 #include <Arduino.h>
 
 #ifdef ESP32
