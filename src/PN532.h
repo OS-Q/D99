@@ -1,5 +1,5 @@
-#ifndef ADAFRUIT_PN532_H
-#define ADAFRUIT_PN532_H
+#ifndef PN532_H
+#define PN532_H
 
 #if ARDUINO >= 100
  #include "Arduino.h"
