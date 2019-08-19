@@ -4,5 +4,6 @@
 #include "./NDEF/PN532_SPI.h"
 #include "./NDEF/snep.h"
 #include "./NDEF/NdefMessage.h"
+#include "./NDEF/llcp.h"
 
 #endif
