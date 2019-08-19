@@ -1,11 +1,5 @@
 /*
- * NOTE: The library file MFRC522.h has a lot of useful info. Please read it.
- * 
- * Released into the public domain.
- * ----------------------------------------------------------------------------
- * Example sketch/program which will try the most used default keys listed in 
- * https://code.google.com/p/mfcuk/wiki/MifareClassicDefaultKeys to dump the
- * block 0 of a MIFARE RFID card using a RFID-RC522 reader.
+ * dump the block 0 of a MIFARE RFID card using a RFID-RC522 reader.
  * 
  * Typical pin layout used:
  * -----------------------------------------------------------------------------------------

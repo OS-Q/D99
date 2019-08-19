@@ -20,6 +20,7 @@
 #include <MFRC522.h>
 
 #define RST_PIN         5          // Configurable, see typical pin layout above
+
 #define SS_1_PIN        15         // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 2
 #define SS_2_PIN        16          // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 1
 
@@ -33,10 +34,11 @@ MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
  * Initialize.
  */
 void setup() {
-
-  Serial.begin(115200); // Initialize serial communications with the PC
-  while (!Serial);    // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-
+  #ifndef ESP8266
+    while (!Serial); // for Leonardo/Micro/Zero
+  #endif
+  Serial.begin(115200);
+  Serial.println("QITAS!");
   SPI.begin();        // Init SPI bus
 
   for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {

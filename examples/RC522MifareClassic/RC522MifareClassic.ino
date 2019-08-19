@@ -1,14 +1,5 @@
 /**
- * NOTE: The library file MFRC522.h has a lot of useful info. Please read it.
- * 
- * Released into the public domain.
- * ----------------------------------------------------------------------------
- * This sample shows how to setup blocks on a MIFARE Classic PICC (= card/tag)
- * to be in "Value Block" mode: in this mode the operations Increment/Decrement,
- * Restore and Transfer can be used.
- * 
  * BEWARE: Data will be written to the PICC, in sector #1 (blocks #4 to #7).
- * 
  * 
  * Typical pin layout used:
  * -----------------------------------------------------------------------------------------
@@ -33,9 +24,6 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);   // Create MFRC522 instance.
 
 MFRC522::MIFARE_Key key;
 
-/**
- * Initialize.
- */
 void setup() {
     Serial.begin(115200);	// Initialize serial communications with the PC
     while (!Serial);    // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
@@ -56,9 +44,7 @@ void setup() {
     Serial.println(F("BEWARE: Data will be written to the PICC, in sector #1"));
 }
 
-/**
- * Main loop.
- */
+
 void loop() {
     // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
     if ( ! mfrc522.PICC_IsNewCardPresent())

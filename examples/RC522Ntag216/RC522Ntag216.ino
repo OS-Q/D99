@@ -18,8 +18,10 @@
 MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance
 
 void setup() {
+  #ifndef ESP8266
+    while (!Serial); // for Leonardo/Micro/Zero
+  #endif  
   Serial.begin(115200);   // Initialize serial communications with the PC
-  while (!Serial);    // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
   SPI.begin();      // Init SPI bus
   mfrc522.PCD_Init();   // Init MFRC522
   Serial.println(F("Scan PICC to see UID, type, and data blocks..."));
