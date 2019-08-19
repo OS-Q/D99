@@ -1,4 +1,5 @@
 /*
+ * Typical pin layout used:
  * -----------------------------------------------------------------------------------------
  *             Reader/PCD   Uno/101       Mega      Nano v3    Leonardo/Micro   Pro Micro   ESP8266
  * -----------------------------------------------------------------------------------------
@@ -21,16 +22,17 @@
 
 //Adafruit_PN532 nfc(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_SS);
 
-// Use this line for a breakout with a hardware SPI connection.  Note that
-// the PN532 SCK, MOSI, and MISO pins need to be connected to the Arduino's
-// hardware SPI SCK, MOSI, and MISO pins.  On an Arduino Uno these are
-// SCK = 13, MOSI = 11, MISO = 12.  The SS line can be any digital IO pin.
+// Use this line for a breakout with a hardware SPI connection. 
 Adafruit_PN532 nfc(PN532_SS);
+
 
 // Or use this line for a breakout or shield with an I2C connection:
 //Adafruit_PN532 nfc(PN532_IRQ, PN532_RESET);
 
 void setup(void) {
+  #ifndef ESP8266
+    while (!Serial); // for Leonardo/Micro/Zero
+  #endif
   Serial.begin(115200);
   Serial.println("Hello!");
 
