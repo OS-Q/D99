@@ -17,7 +17,7 @@
 byte pn532ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
 byte pn532response_firmwarevers[] = {0x00, 0xFF, 0x06, 0xFA, 0xD5, 0x03};
 
-// Uncomment these lines to enable debug output for PN532(SPI) and/or MIFARE related code
+// Uncomment these lines to enable debug output for NFC(SPI) and/or MIFARE related code
 // #define PN532DEBUG
 // #define MIFAREDEBUG
 
@@ -71,7 +71,7 @@ static inline uint8_t i2c_recv(void)
 
 /**************************************************************************/
 /*!
-    @brief  Instantiates a new PN532 class using software SPI.
+    @brief  Instantiates a new NFC class using software SPI.
 
     @param  clk       SPI clock pin (SCK)
     @param  miso      SPI MISO pin
@@ -79,7 +79,7 @@ static inline uint8_t i2c_recv(void)
     @param  ss        SPI chip select pin (CS/SSEL)
 */
 /**************************************************************************/
-PN532::PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss):
+NFC::NFC(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss):
   _clk(clk),
   _miso(miso),
   _mosi(mosi),
@@ -98,13 +98,13 @@ PN532::PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss):
 
 /**************************************************************************/
 /*!
-    @brief  Instantiates a new PN532 class using I2C.
+    @brief  Instantiates a new NFC class using I2C.
 
     @param  irq       Location of the IRQ pin
     @param  reset     Location of the RSTPD_N pin
 */
 /**************************************************************************/
-PN532::PN532(uint8_t irq, uint8_t reset):
+NFC::NFC(uint8_t irq, uint8_t reset):
   _clk(0),
   _miso(0),
   _mosi(0),
@@ -120,12 +120,12 @@ PN532::PN532(uint8_t irq, uint8_t reset):
 
 /**************************************************************************/
 /*!
-    @brief  Instantiates a new PN532 class using hardware SPI.
+    @brief  Instantiates a new NFC class using hardware SPI.
 
     @param  ss        SPI chip select pin (CS/SSEL)
 */
 /**************************************************************************/
-PN532::PN532(uint8_t ss):
+NFC::NFC(uint8_t ss):
   _clk(0),
   _miso(0),
   _mosi(0),
@@ -144,7 +144,7 @@ PN532::PN532(uint8_t ss):
     @brief  Setups the HW
 */
 /**************************************************************************/
-void PN532::begin() {
+void NFC::begin() {
   if (_usingSPI) {
     // SPI initialization
     if (_hardwareSPI) {
@@ -177,7 +177,7 @@ void PN532::begin() {
     // I2C initialization.
     WIRE.begin();
 
-    // Reset the PN532
+    // Reset the NFC
     digitalWrite(_reset, HIGH);
     digitalWrite(_reset, LOW);
     delay(400);
@@ -195,7 +195,7 @@ void PN532::begin() {
     @param  numBytes  Data length in bytes
 */
 /**************************************************************************/
-void PN532::PrintHex(const byte * data, const uint32_t numBytes)
+void NFC::PrintHex(const byte * data, const uint32_t numBytes)
 {
   uint32_t szPos;
   for (szPos=0; szPos < numBytes; szPos++)
@@ -224,7 +224,7 @@ void PN532::PrintHex(const byte * data, const uint32_t numBytes)
     @param  numBytes  Data length in bytes
 */
 /**************************************************************************/
-void PN532::PrintHexChar(const byte * data, const uint32_t numBytes)
+void NFC::PrintHexChar(const byte * data, const uint32_t numBytes)
 {
   uint32_t szPos;
   for (szPos=0; szPos < numBytes; szPos++)
@@ -256,7 +256,7 @@ void PN532::PrintHexChar(const byte * data, const uint32_t numBytes)
     @returns  The chip's firmware version and ID
 */
 /**************************************************************************/
-uint32_t PN532::getFirmwareVersion(void) {
+uint32_t NFC::getFirmwareVersion(void) {
   uint32_t response;
 
   pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
@@ -302,7 +302,7 @@ uint32_t PN532::getFirmwareVersion(void) {
 */
 /**************************************************************************/
 // default timeout of one second
-bool PN532::sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout) {
+bool NFC::sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout) {
   uint16_t timer = 0;
 
   // write the command
@@ -340,14 +340,14 @@ bool PN532::sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout) 
 
 /**************************************************************************/
 /*!
-    Writes an 8-bit value that sets the state of the PN532's GPIO pins
+    Writes an 8-bit value that sets the state of the NFC's GPIO pins
 
     @warning This function is provided exclusively for board testing and
              is dangerous since it will throw an error if any pin other
              than the ones marked "Can be used as GPIO" are modified!  All
              pins that can not be used as GPIO should ALWAYS be left high
              (value = 1) or the system will become unstable and a HW reset
-             will be required to recover the PN532.
+             will be required to recover the NFC.
 
              pinState[0]  = P30     Can be used as GPIO
              pinState[1]  = P31     Can be used as GPIO
@@ -359,7 +359,7 @@ bool PN532::sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout) 
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-bool PN532::writeGPIO(uint8_t pinstate) {
+bool NFC::writeGPIO(uint8_t pinstate) {
   uint8_t errorbit;
 
   // Make sure pinstate does not try to toggle P32 or P34
@@ -393,7 +393,7 @@ bool PN532::writeGPIO(uint8_t pinstate) {
 
 /**************************************************************************/
 /*!
-    Reads the state of the PN532's GPIO pins
+    Reads the state of the NFC's GPIO pins
 
     @returns An 8-bit value containing the pin state where:
 
@@ -405,7 +405,7 @@ bool PN532::writeGPIO(uint8_t pinstate) {
              pinState[5]  = P35
 */
 /**************************************************************************/
-uint8_t PN532::readGPIO(void) {
+uint8_t NFC::readGPIO(void) {
   pn532_packetbuffer[0] = PN532_COMMAND_READGPIO;
 
   // Send the READGPIO command (0x0C)
@@ -457,7 +457,7 @@ uint8_t PN532::readGPIO(void) {
     @brief  Configures the SAM (Secure Access Module)
 */
 /**************************************************************************/
-bool PN532::SAMConfig(void) {
+bool NFC::SAMConfig(void) {
   pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
   pn532_packetbuffer[1] = 0x01; // normal mode;
   pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
@@ -483,7 +483,7 @@ bool PN532::SAMConfig(void) {
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-bool PN532::setPassiveActivationRetries(uint8_t maxRetries) {
+bool NFC::setPassiveActivationRetries(uint8_t maxRetries) {
   pn532_packetbuffer[0] = PN532_COMMAND_RFCONFIGURATION;
   pn532_packetbuffer[1] = 5;    // Config item 5 (MaxRetries)
   pn532_packetbuffer[2] = 0xFF; // MxRtyATR (default = 0xFF)
@@ -515,7 +515,7 @@ bool PN532::setPassiveActivationRetries(uint8_t maxRetries) {
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-bool PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, uint8_t * uidLength, uint16_t timeout) {
+bool NFC::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, uint8_t * uidLength, uint16_t timeout) {
   pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
   pn532_packetbuffer[1] = 1;  // max 1 cards at once (we can set this to 2 later)
   pn532_packetbuffer[2] = cardbaudrate;
@@ -600,7 +600,7 @@ bool PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, uint8_t * u
     @param  responseLength  Pointer to the response data length
 */
 /**************************************************************************/
-bool PN532::inDataExchange(uint8_t * send, uint8_t sendLength, uint8_t * response, uint8_t * responseLength) {
+bool NFC::inDataExchange(uint8_t * send, uint8_t sendLength, uint8_t * response, uint8_t * responseLength) {
   if (sendLength > PN532_PACKBUFFSIZ-2) {
     #ifdef PN532DEBUG
       PN532DEBUGPRINT.println(F("APDU length too long for packet buffer"));
@@ -676,11 +676,11 @@ bool PN532::inDataExchange(uint8_t * send, uint8_t sendLength, uint8_t * respons
 
 /**************************************************************************/
 /*!
-    @brief  'InLists' a passive target. PN532 acting as reader/initiator,
+    @brief  'InLists' a passive target. NFC acting as reader/initiator,
             peer acting as card/responder.
 */
 /**************************************************************************/
-bool PN532::inListPassiveTarget() {
+bool NFC::inListPassiveTarget() {
   pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
   pn532_packetbuffer[1] = 1;
   pn532_packetbuffer[2] = 0;
@@ -753,7 +753,7 @@ bool PN532::inListPassiveTarget() {
       in the sector (block 0 relative to the current sector)
 */
 /**************************************************************************/
-bool PN532::mifareclassic_IsFirstBlock (uint32_t uiBlock)
+bool NFC::mifareclassic_IsFirstBlock (uint32_t uiBlock)
 {
   // Test if we are in the small or big sectors
   if (uiBlock < 128)
@@ -767,7 +767,7 @@ bool PN532::mifareclassic_IsFirstBlock (uint32_t uiBlock)
       Indicates whether the specified block number is the sector trailer
 */
 /**************************************************************************/
-bool PN532::mifareclassic_IsTrailerBlock (uint32_t uiBlock)
+bool NFC::mifareclassic_IsTrailerBlock (uint32_t uiBlock)
 {
   // Test if we are in the small or big sectors
   if (uiBlock < 128)
@@ -779,7 +779,7 @@ bool PN532::mifareclassic_IsTrailerBlock (uint32_t uiBlock)
 /**************************************************************************/
 /*!
     Tries to authenticate a block of memory on a MIFARE card using the
-    INDATAEXCHANGE command.  See section 7.3.8 of the PN532 User Manual
+    INDATAEXCHANGE command.  See section 7.3.8 of the NFC User Manual
     for more information on sending MIFARE and other commands.
 
     @param  uid           Pointer to a byte array containing the card UID
@@ -795,7 +795,7 @@ bool PN532::mifareclassic_IsTrailerBlock (uint32_t uiBlock)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, uint32_t blockNumber, uint8_t keyNumber, uint8_t * keyData)
+uint8_t NFC::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, uint32_t blockNumber, uint8_t keyNumber, uint8_t * keyData)
 {
   uint8_t len;
   uint8_t i;
@@ -807,9 +807,9 @@ uint8_t PN532::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, u
 
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Trying to authenticate card "));
-    PN532::PrintHex(_uid, _uidLen);
+    NFC::PrintHex(_uid, _uidLen);
     PN532DEBUGPRINT.print(F("Using authentication KEY "));PN532DEBUGPRINT.print(keyNumber ? 'B' : 'A');PN532DEBUGPRINT.print(F(": "));
-    PN532::PrintHex(_key, 6);
+    NFC::PrintHex(_key, 6);
   #endif
 
   // Prepare the authentication command //
@@ -836,7 +836,7 @@ uint8_t PN532::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, u
   {
     #ifdef PN532DEBUG
       PN532DEBUGPRINT.print(F("Authentification failed: "));
-      PN532::PrintHexChar(pn532_packetbuffer, 12);
+      NFC::PrintHexChar(pn532_packetbuffer, 12);
     #endif
     return 0;
   }
@@ -857,7 +857,7 @@ uint8_t PN532::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, u
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
+uint8_t NFC::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
 {
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Trying to read 16 bytes from block "));PN532DEBUGPRINT.println(blockNumber);
@@ -886,7 +886,7 @@ uint8_t PN532::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
   {
     #ifdef MIFAREDEBUG
       PN532DEBUGPRINT.println(F("Unexpected response"));
-      PN532::PrintHexChar(pn532_packetbuffer, 26);
+      NFC::PrintHexChar(pn532_packetbuffer, 26);
     #endif
     return 0;
   }
@@ -899,7 +899,7 @@ uint8_t PN532::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Block "));
     PN532DEBUGPRINT.println(blockNumber);
-    PN532::PrintHexChar(data, 16);
+    NFC::PrintHexChar(data, 16);
   #endif
 
   return 1;
@@ -917,7 +917,7 @@ uint8_t PN532::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareclassic_WriteDataBlock (uint8_t blockNumber, uint8_t * data)
+uint8_t NFC::mifareclassic_WriteDataBlock (uint8_t blockNumber, uint8_t * data)
 {
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Trying to write 16 bytes to block "));PN532DEBUGPRINT.println(blockNumber);
@@ -953,7 +953,7 @@ uint8_t PN532::mifareclassic_WriteDataBlock (uint8_t blockNumber, uint8_t * data
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareclassic_FormatNDEF (void)
+uint8_t NFC::mifareclassic_FormatNDEF (void)
 {
   uint8_t sectorbuffer1[16] = {0x14, 0x01, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1};
   uint8_t sectorbuffer2[16] = {0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1};
@@ -993,7 +993,7 @@ uint8_t PN532::mifareclassic_FormatNDEF (void)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareclassic_WriteNDEFURI (uint8_t sectorNumber, uint8_t uriIdentifier, const char * url)
+uint8_t NFC::mifareclassic_WriteNDEFURI (uint8_t sectorNumber, uint8_t uriIdentifier, const char * url)
 {
   // Figure out how long the string is
   uint8_t len = strlen(url);
@@ -1074,7 +1074,7 @@ uint8_t PN532::mifareclassic_WriteNDEFURI (uint8_t sectorNumber, uint8_t uriIden
                         retrieved data (if any)
 */
 /**************************************************************************/
-uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
+uint8_t NFC::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
 {
   if (page >= 64)
   {
@@ -1107,7 +1107,7 @@ uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
   readdata(pn532_packetbuffer, 26);
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.println(F("Received: "));
-    PN532::PrintHexChar(pn532_packetbuffer, 26);
+    NFC::PrintHexChar(pn532_packetbuffer, 26);
   #endif
 
   /* If byte 8 isn't 0x00 we probably have an error */
@@ -1124,7 +1124,7 @@ uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
   {
     #ifdef MIFAREDEBUG
       PN532DEBUGPRINT.println(F("Unexpected response reading block: "));
-      PN532::PrintHexChar(pn532_packetbuffer, 26);
+      NFC::PrintHexChar(pn532_packetbuffer, 26);
     #endif
     return 0;
   }
@@ -1132,7 +1132,7 @@ uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
   /* Display data for debug if requested */
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Page "));PN532DEBUGPRINT.print(page);PN532DEBUGPRINT.println(F(":"));
-    PN532::PrintHexChar(buffer, 4);
+    NFC::PrintHexChar(buffer, 4);
   #endif
 
   // Return OK signal
@@ -1151,7 +1151,7 @@ uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::mifareultralight_WritePage (uint8_t page, uint8_t * data)
+uint8_t NFC::mifareultralight_WritePage (uint8_t page, uint8_t * data)
 {
 
   if (page >= 64)
@@ -1205,7 +1205,7 @@ uint8_t PN532::mifareultralight_WritePage (uint8_t page, uint8_t * data)
                         retrieved data (if any)
 */
 /**************************************************************************/
-uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
+uint8_t NFC::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
 {
   // TAG Type       PAGES   USER START    USER STOP
   // --------       -----   ----------    ---------
@@ -1245,7 +1245,7 @@ uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
   readdata(pn532_packetbuffer, 26);
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.println(F("Received: "));
-    PN532::PrintHexChar(pn532_packetbuffer, 26);
+    NFC::PrintHexChar(pn532_packetbuffer, 26);
   #endif
 
   /* If byte 8 isn't 0x00 we probably have an error */
@@ -1262,7 +1262,7 @@ uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
   {
     #ifdef MIFAREDEBUG
       PN532DEBUGPRINT.println(F("Unexpected response reading block: "));
-      PN532::PrintHexChar(pn532_packetbuffer, 26);
+      NFC::PrintHexChar(pn532_packetbuffer, 26);
     #endif
     return 0;
   }
@@ -1270,7 +1270,7 @@ uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
   /* Display data for debug if requested */
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("Page "));PN532DEBUGPRINT.print(page);PN532DEBUGPRINT.println(F(":"));
-    PN532::PrintHexChar(buffer, 4);
+    NFC::PrintHexChar(buffer, 4);
   #endif
 
   // Return OK signal
@@ -1289,7 +1289,7 @@ uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::ntag2xx_WritePage (uint8_t page, uint8_t * data)
+uint8_t NFC::ntag2xx_WritePage (uint8_t page, uint8_t * data)
 {
   // TAG Type       PAGES   USER START    USER STOP
   // --------       -----   ----------    ---------
@@ -1352,7 +1352,7 @@ uint8_t PN532::ntag2xx_WritePage (uint8_t page, uint8_t * data)
     @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-uint8_t PN532::ntag2xx_WriteNDEFURI (uint8_t uriIdentifier, char * url, uint8_t dataLen)
+uint8_t NFC::ntag2xx_WriteNDEFURI (uint8_t uriIdentifier, char * url, uint8_t dataLen)
 {
   uint8_t pageBuffer[4] = { 0, 0, 0, 0 };
 
@@ -1450,7 +1450,7 @@ uint8_t PN532::ntag2xx_WriteNDEFURI (uint8_t uriIdentifier, char * url, uint8_t 
     @brief  Tries to read the SPI or I2C ACK signal
 */
 /**************************************************************************/
-bool PN532::readack() {
+bool NFC::readack() {
   uint8_t ackbuff[6];
 
   readdata(ackbuff, 6);
@@ -1461,10 +1461,10 @@ bool PN532::readack() {
 
 /**************************************************************************/
 /*!
-    @brief  Return true if the PN532 is ready with a response.
+    @brief  Return true if the NFC is ready with a response.
 */
 /**************************************************************************/
-bool PN532::isready() {
+bool NFC::isready() {
   if (_usingSPI) {
     // SPI read status and check if ready.
     #ifdef SPI_HAS_TRANSACTION
@@ -1493,12 +1493,12 @@ bool PN532::isready() {
 
 /**************************************************************************/
 /*!
-    @brief  Waits until the PN532 is ready.
+    @brief  Waits until the NFC is ready.
 
     @param  timeout   Timeout before giving up
 */
 /**************************************************************************/
-bool PN532::waitready(uint16_t timeout) {
+bool NFC::waitready(uint16_t timeout) {
   uint16_t timer = 0;
   while(!isready()) {
     if (timeout != 0) {
@@ -1515,13 +1515,13 @@ bool PN532::waitready(uint16_t timeout) {
 
 /**************************************************************************/
 /*!
-    @brief  Reads n bytes of data from the PN532 via SPI or I2C.
+    @brief  Reads n bytes of data from the NFC via SPI or I2C.
 
     @param  buff      Pointer to the buffer where data will be written
     @param  n         Number of bytes to be read
 */
 /**************************************************************************/
-void PN532::readdata(uint8_t* buff, uint8_t n) {
+void NFC::readdata(uint8_t* buff, uint8_t n) {
   if (_usingSPI) {
     // SPI write.
     #ifdef SPI_HAS_TRANSACTION
@@ -1584,7 +1584,7 @@ void PN532::readdata(uint8_t* buff, uint8_t n) {
 
 /**************************************************************************/
 /*!
-    @brief  set the PN532 as iso14443a Target behaving as a SmartCard
+    @brief  set the NFC as iso14443a Target behaving as a SmartCard
     @param  None
     #author Salvador Mendoza(salmg.net) new functions:
     -AsTarget
@@ -1592,7 +1592,7 @@ void PN532::readdata(uint8_t* buff, uint8_t n) {
     -setDataTarget
 */
 /**************************************************************************/
-uint8_t PN532::AsTarget() {
+uint8_t NFC::AsTarget() {
    pn532_packetbuffer[0] = 0x8C;
     uint8_t target[] = {
     0x8C, // INIT AS TARGET
@@ -1624,7 +1624,7 @@ uint8_t PN532::AsTarget() {
     @param  cmdlen = data length
 */
 /**************************************************************************/
-uint8_t PN532::getDataTarget(uint8_t* cmd, uint8_t *cmdlen) {
+uint8_t NFC::getDataTarget(uint8_t* cmd, uint8_t *cmdlen) {
   uint8_t length;
   pn532_packetbuffer[0] = 0x86;
   if (!sendCommandCheckAck(pn532_packetbuffer, 1, 1000)){
@@ -1649,13 +1649,13 @@ uint8_t PN532::getDataTarget(uint8_t* cmd, uint8_t *cmdlen) {
 
 /**************************************************************************/
 /*!
-    @brief  set data in PN532 in the emulation mode
+    @brief  set data in NFC in the emulation mode
 
     @param  cmd    = data
     @param  cmdlen = data length
 */
 /**************************************************************************/
-uint8_t PN532::setDataTarget(uint8_t* cmd, uint8_t cmdlen) {
+uint8_t NFC::setDataTarget(uint8_t* cmd, uint8_t cmdlen) {
   uint8_t length;
   //cmd1[0] = 0x8E; Must!
 
@@ -1677,14 +1677,14 @@ uint8_t PN532::setDataTarget(uint8_t* cmd, uint8_t cmdlen) {
 
 /**************************************************************************/
 /*!
-    @brief  Writes a command to the PN532, automatically inserting the
+    @brief  Writes a command to the NFC, automatically inserting the
             preamble and required frame details (checksum, len, etc.)
 
     @param  cmd       Pointer to the command buffer
     @param  cmdlen    Command length in bytes
 */
 /**************************************************************************/
-void PN532::writecommand(uint8_t* cmd, uint8_t cmdlen) {
+void NFC::writecommand(uint8_t* cmd, uint8_t cmdlen) {
   if (_usingSPI) {
     // SPI command write.
     uint8_t checksum;
@@ -1808,7 +1808,7 @@ void PN532::writecommand(uint8_t* cmd, uint8_t cmdlen) {
     @param  c       8-bit command to write to the SPI bus
 */
 /**************************************************************************/
-void PN532::spi_write(uint8_t c) {
+void NFC::spi_write(uint8_t c) {
   if (_hardwareSPI) {
     // Hardware SPI write.
     SPI.transfer(c);
@@ -1837,7 +1837,7 @@ void PN532::spi_write(uint8_t c) {
     @returns The 8-bit value that was read from the SPI bus
 */
 /**************************************************************************/
-uint8_t PN532::spi_read(void) {
+uint8_t NFC::spi_read(void) {
   int8_t i, x;
   x = 0;
 

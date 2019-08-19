@@ -15,7 +15,7 @@
 #define PN532_HOSTTOPN532                   (0xD4)
 #define PN532_PN532TOHOST                   (0xD5)
 
-// PN532 Commands
+// NFC Commands
 #define PN532_COMMAND_DIAGNOSE              (0x00)
 #define PN532_COMMAND_GETFIRMWAREVERSION    (0x02)
 #define PN532_COMMAND_GETGENERALSTATUS      (0x04)
@@ -124,14 +124,14 @@
 #define PN532_GPIO_P34                      (4)
 #define PN532_GPIO_P35                      (5)
 
-class PN532{
+class NFC{
  public:
-  PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss);  // Software SPI
-  PN532(uint8_t irq, uint8_t reset);  // Hardware I2C
-  PN532(uint8_t ss);  // Hardware SPI
+  NFC(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss);  // Software SPI
+  NFC(uint8_t irq, uint8_t reset);  // Hardware I2C
+  NFC(uint8_t ss);  // Hardware SPI
   void begin(void);
   
-  // Generic PN532 functions
+  // Generic NFC functions
   bool     SAMConfig(void);
   uint32_t getFirmwareVersion(void);
   bool     sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout = 1000);  
