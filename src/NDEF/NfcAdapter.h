@@ -1,14 +1,14 @@
 #ifndef NfcAdapter_h
 #define NfcAdapter_h
 
-#include <PN532Interface.h>
-#include <PN532.h>
-#include <NfcTag.h>
-#include <Ndef.h>
-
+#include "./PN532Interface.h"
+#include "./PN532.h"
+#include "./NfcTag.h"
+#include "./Ndef.h"
 // Drivers
-#include <MifareClassic.h>
-#include <MifareUltralight.h>
+#include "./MifareClassic.h"
+#include "./MifareUltralight.h"
+
 
 #define TAG_TYPE_MIFARE_CLASSIC (0)
 #define TAG_TYPE_1 (1)

@@ -1,4 +1,4 @@
-#include "NdefRecord.h"
+#include "./NdefRecord.h"
 
 NdefRecord::NdefRecord()
 {

@@ -1,4 +1,4 @@
-#include "Ndef.h"
+#include "./Ndef.h"
 
 #ifdef NDEF_USE_SERIAL
 // Borrowed from Adafruit_NFCShield_I2C

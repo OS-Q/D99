@@ -10,7 +10,7 @@
 #define __PN532_H__
 
 #include <stdint.h>
-#include "PN532Interface.h"
+#include "./PN532Interface.h"
 
 // PN532 Commands
 #define PN532_COMMAND_DIAGNOSE              (0x00)

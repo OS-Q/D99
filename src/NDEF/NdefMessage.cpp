@@ -1,5 +1,6 @@
 //#include <NdefMessage.h>
 #include "./NdefMessage.h"
+
 NdefMessage::NdefMessage(void)
 {
     _recordCount = 0;

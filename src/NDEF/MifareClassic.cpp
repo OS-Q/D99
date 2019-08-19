@@ -1,4 +1,4 @@
-#include "MifareClassic.h"
+#include "./MifareClassic.h"
 #ifdef NDEF_SUPPORT_MIFARE_CLASSIC
 
 #define BLOCK_SIZE 16

@@ -1,6 +1,6 @@
 
-#include "mac_link.h"
-#include "PN532_debug.h"
+#include "./mac_link.h"
+#include "./PN532_debug.h"
 
 int8_t MACLink::activateAsTarget(uint16_t timeout)
 {
