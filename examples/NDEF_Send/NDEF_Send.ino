@@ -1,12 +1,12 @@
 #include "SPI.h"
 #include "NDEF.h"
 
-PN532_SPI pn532spi(SPI, 10);
+PN532_SPI pn532spi(SPI, 15);
 SNEP nfc(pn532spi);
 uint8_t ndefBuf[128];
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
     Serial.println("NFC Peer to Peer Example - Send Message");
 }
 
