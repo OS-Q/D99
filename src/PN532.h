@@ -1,225 +1,11 @@
-#ifndef PN532_H
-#define PN532_H
+#ifndef ADAFRUIT_PN532_H
+#define ADAFRUIT_PN532_H
 
-#include <Arduino.h>
-
-#define TRUE   true
-#define FALSE  false
-
-#define USE_SOFTWARE_SPI   TRUE   // Visual Studio needs this in upper case
-#define USE_HARDWARE_SPI   FALSE  // Visual Studio needs this in upper case
-#define USE_HARDWARE_I2C   FALSE  // Visual Studio needs this in upper case
-
-
-#if USE_HARDWARE_SPI
-    #include <SPI.h>  // Hardware SPI bus
-#elif USE_HARDWARE_I2C
-    #include <Wire.h> // Hardware I2C bus
-#elif USE_SOFTWARE_SPI
-    // no #include required
+#if ARDUINO >= 100
+ #include "Arduino.h"
 #else
-    #error "You must specify the PN532 communication mode."
+ #include "WProgram.h"
 #endif
-
-#define LF  "\r\n" // LineFeed 
-
-// Teensy definitions for digital pins:
-#ifndef INPUT
-    #define OUTPUT   0x1
-    #define INPUT    0x0
-    #define HIGH     0x1
-    #define LOW      0x0
-#endif
-
-
-class SerialClass
-{  
-public:
-    // Create a COM connection via USB.
-    // Teensy ignores the baudrate parameter (only for older Arduino boards)
-    static inline void Begin(uint32_t u32_Baud) 
-    {
-        Serial.begin(u32_Baud);
-    }
-    // returns how many characters the user has typed in the Terminal program on the PC which have not yet been read with Read()
-    static inline int Available()
-    {
-        return Serial.available();
-    }
-    // Get the next character from the Terminal program on the PC
-    // returns -1 if no character available
-    static inline int Read()
-    {
-        return Serial.read();
-    }
-    // Print text to the Terminal program on the PC
-    // On Windows/Linux use printf() here to write debug output an errors to the Console.
-    static inline void Print(const char* s8_Text)
-    {
-        Serial.print(s8_Text);
-    }
-};
-
-// -------------------------------------------------------------------------------------------------------------------
-
-#if USE_HARDWARE_SPI
-    // This class implements Hardware SPI (4 wire bus). It is not used for the DoorOpener sketch.
-    // NOTE: This class is not used when you switched to I2C mode with PN532::InitI2C() or Software SPI mode with PN532::InitSoftwareSPI().
-    class SpiClass
-    {  
-    public:
-        static inline void Begin(uint32_t u32_Clock) 
-        {
-            SPI.begin();
-            SPI.beginTransaction(SPISettings(u32_Clock, LSBFIRST, SPI_MODE0));
-        }
-        // Write one byte to the MOSI pin and at the same time receive one byte on the MISO pin.
-        static inline byte Transfer(byte u8_Data) 
-        {
-            return SPI.transfer(u8_Data);
-        }
-    };
-#endif
-
-// -------------------------------------------------------------------------------------------------------------------
-
-#if USE_HARDWARE_I2C
-    // This class implements Hardware I2C (2 wire bus with pull-up resistors). It is not used for the DoorOpener sketch.
-    // NOTE: This class is not used when you switched to SPI mode with PN532::InitSoftwareSPI() or PN532::InitHardwareSPI().
-    class I2cClass
-    {  
-    public:
-        // Initialize the I2C pins
-        static inline void Begin() 
-        {
-            Wire.begin();
-        }
-        // --------------------- READ -------------------------
-        // Read the requested amount of bytes at once from the I2C bus into an internal buffer.
-        // ATTENTION: The Arduino library is extremely primitive. A timeout has not been implemented.
-        // When the CLK line is permanently low this function hangs forever!
-        static inline byte RequestFrom(byte u8_Address, byte u8_Quantity)
-        {
-            return Wire.requestFrom(u8_Address, u8_Quantity);
-        }
-        // Read one byte from the buffer that has been read when calling RequestFrom()
-        static inline int Read()
-        {
-            return Wire.read();
-        }
-        // --------------------- WRITE -------------------------
-        // Initiates a Send transmission
-        static inline void BeginTransmission(byte u8_Address)
-        {
-            Wire.beginTransmission(u8_Address);
-        }
-        // Write one byte to the I2C bus
-        static inline void Write(byte u8_Data)
-        {
-            Wire.write(u8_Data);
-        }
-        // Ends a Send transmission
-        static inline void EndTransmission()
-        {
-            Wire.endTransmission();
-        }
-    };
-#endif
-
-// -------------------------------------------------------------------------------------------------------------------
-
-class Utils
-{
-public:
-    // returns the current tick counter
-    // If you compile on Visual Studio see WinDefines.h
-    static inline uint32_t GetMillis()
-    {
-        return millis();
-    }
-
-    // If you compile on Visual Studio see WinDefines.h
-    static inline void DelayMilli(int s32_MilliSeconds)
-    {
-        delay(s32_MilliSeconds);
-    }
-
-    // This function is only required for Software SPI mode.
-    // If you compile on Visual Studio see WinDefines.h
-    static inline void DelayMicro(int s32_MicroSeconds)
-    {
-        delayMicroseconds(s32_MicroSeconds);
-    }
-    
-    // Defines if a digital processor pin is used as input or output
-    // u8_Mode = INPUT or OUTPUT
-    // If you compile on Visual Studio see WinDefines.h   
-    static inline void SetPinMode(byte u8_Pin, byte u8_Mode)
-    {
-        pinMode(u8_Pin, u8_Mode);
-    }
-    
-    // Sets a digital processor pin high or low.
-    // u8_Status = HIGH or LOW
-    // If you compile on Visual Studio see WinDefines.h
-    static inline void WritePin(byte u8_Pin, byte u8_Status)
-    {
-        digitalWrite(u8_Pin, u8_Status);
-    }
-
-    // reads the current state of a digital processor pin.
-    // returns HIGH or LOW
-    // If you compile on Visual Studio see WinDefines.h   
-    static inline byte ReadPin(byte u8_Pin)
-    {
-        return digitalRead(u8_Pin);
-    }
-
-    static uint64_t GetMillis64();
-    static void     Print(const char*   s8_Text,  const char* s8_LF=NULL);
-    static void     PrintDec  (int      s32_Data, const char* s8_LF=NULL);
-    static void     PrintHex8 (byte     u8_Data,  const char* s8_LF=NULL);
-    static void     PrintHex16(uint16_t u16_Data, const char* s8_LF=NULL);
-    static void     PrintHex32(uint32_t u32_Data, const char* s8_LF=NULL);
-    static void     PrintHexBuf(const byte* u8_Data, const uint32_t u32_DataLen, const char* s8_LF=NULL, int s32_Brace1=-1, int S32_Brace2=-1);
-    static void     PrintInterval(uint64_t u64_Time, const char* s8_LF=NULL);
-    static void     GenerateRandom(byte* u8_Random, int s32_Length);
-    static void     RotateBlockLeft(byte* u8_Out, const byte* u8_In, int s32_Length);
-    static void     BitShiftLeft(uint8_t* u8_Data, int s32_Length);
-    static void     XorDataBlock(byte* u8_Out,  const byte* u8_In, const byte* u8_Xor, int s32_Length);    
-    static void     XorDataBlock(byte* u8_Data, const byte* u8_Xor, int s32_Length);
-    static uint16_t CalcCrc16(const byte* u8_Data,  int s32_Length);
-    static uint32_t CalcCrc32(const byte* u8_Data1, int s32_Length1, const byte* u8_Data2=NULL, int s32_Length2=0);
-    static int      strnicmp(const char* str1, const char* str2, uint32_t u32_MaxCount);
-    static int      stricmp (const char* str1, const char* str2);
-
-private:
-    static uint32_t CalcCrc32(const byte* u8_Data, int s32_Length, uint32_t u32_Crc);
-};
-
-
-// ----------------------------------------------------------------------
-// This parameter may be used to slow down the software SPI bus speed.
-// This is required when there is a long cable between the PN532 and the Teensy.
-// This delay in microseconds (not milliseconds!) is made between toggeling the CLK line.
-// Use an oscilloscope to check the resulting speed!
-// A value of 50 microseconds results in a clock signal of 10 kHz
-// A value of 0 results in maximum speed (depends on CPU speed).
-// This parameter is not used for hardware SPI mode.
-#define PN532_SOFT_SPI_DELAY  50
-
-// The clock (in Hertz) when using Hardware SPI mode
-// This parameter is not used for software SPI mode.
-#define PN532_HARD_SPI_CLOCK  1000000
-
-// The maximum time to wait for an answer from the PN532
-// Do NOT use infinite timeouts like in Adafruit code!
-#define PN532_TIMEOUT  1000
-
-// The packet buffer is used for sending commands and for receiving responses from the PN532
-#define PN532_PACKBUFFSIZE   80
-
-// ----------------------------------------------------------------------
 
 #define PN532_PREAMBLE                      (0x00)
 #define PN532_STARTCODE1                    (0x00)
@@ -263,31 +49,36 @@ private:
 #define PN532_COMMAND_TGRESPONSETOINITIATOR (0x90)
 #define PN532_COMMAND_TGGETTARGETSTATUS     (0x8A)
 
+#define PN532_RESPONSE_INDATAEXCHANGE       (0x41)
+#define PN532_RESPONSE_INLISTPASSIVETARGET  (0x4B)
+
 #define PN532_WAKEUP                        (0x55)
 
-#define PN532_SPI_STATUSREAD                (0x02)
+#define PN532_SPI_STATREAD                  (0x02)
 #define PN532_SPI_DATAWRITE                 (0x01)
 #define PN532_SPI_DATAREAD                  (0x03)
 #define PN532_SPI_READY                     (0x01)
 
 #define PN532_I2C_ADDRESS                   (0x48 >> 1)
+#define PN532_I2C_READBIT                   (0x01)
+#define PN532_I2C_BUSY                      (0x00)
 #define PN532_I2C_READY                     (0x01)
+#define PN532_I2C_READYTIMEOUT              (20)
 
-#define PN532_GPIO_P30                      (0x01)
-#define PN532_GPIO_P31                      (0x02)
-#define PN532_GPIO_P32                      (0x04)
-#define PN532_GPIO_P33                      (0x08)
-#define PN532_GPIO_P34                      (0x10)
-#define PN532_GPIO_P35                      (0x20)
-#define PN532_GPIO_VALIDATIONBIT            (0x80)
+#define PN532_MIFARE_ISO14443A              (0x00)
 
-#define CARD_TYPE_106KB_ISO14443A           (0x00) // card baudrate 106 kB
-#define CARD_TYPE_212KB_FELICA              (0x01) // card baudrate 212 kB
-#define CARD_TYPE_424KB_FELICA              (0x02) // card baudrate 424 kB
-#define CARD_TYPE_106KB_ISO14443B           (0x03) // card baudrate 106 kB
-#define CARD_TYPE_106KB_JEWEL               (0x04) // card baudrate 106 kB
+// Mifare Commands
+#define MIFARE_CMD_AUTH_A                   (0x60)
+#define MIFARE_CMD_AUTH_B                   (0x61)
+#define MIFARE_CMD_READ                     (0x30)
+#define MIFARE_CMD_WRITE                    (0xA0)
+#define MIFARE_CMD_TRANSFER                 (0xB0)
+#define MIFARE_CMD_DECREMENT                (0xC0)
+#define MIFARE_CMD_INCREMENT                (0xC1)
+#define MIFARE_CMD_STORE                    (0xC2)
+#define MIFARE_ULTRALIGHT_CMD_WRITE         (0xA2)
 
-// Prefixes for NDEF Records (to identify record type), not used
+// Prefixes for NDEF Records (to identify record type)
 #define NDEF_URIPREFIX_NONE                 (0x00)
 #define NDEF_URIPREFIX_HTTP_WWWDOT          (0x01)
 #define NDEF_URIPREFIX_HTTPS_WWWDOT         (0x02)
@@ -325,68 +116,81 @@ private:
 #define NDEF_URIPREFIX_URN_EPC              (0x22)
 #define NDEF_URIPREFIX_URN_NFC              (0x23)
 
-enum eCardType
-{
-    CARD_Unknown   = 0, // Mifare Classic or other card
-    CARD_Desfire   = 1, // A Desfire card with normal 7 byte UID  (bit 0)
-    CARD_DesRandom = 3, // A Desfire card with 4 byte random UID  (bit 0 + 1)
-};
+#define PN532_GPIO_VALIDATIONBIT            (0x80)
+#define PN532_GPIO_P30                      (0)
+#define PN532_GPIO_P31                      (1)
+#define PN532_GPIO_P32                      (2)
+#define PN532_GPIO_P33                      (3)
+#define PN532_GPIO_P34                      (4)
+#define PN532_GPIO_P35                      (5)
 
-class PN532
-{
+class Adafruit_PN532{
  public:
-    PN532();
-    
-    #if USE_SOFTWARE_SPI
-        void InitSoftwareSPI(byte u8_Clk, byte u8_Miso, byte u8_Mosi, byte u8_Sel, byte u8_Reset);
-    #endif
-    #if USE_HARDWARE_SPI
-        void InitHardwareSPI(byte u8_Sel, byte u8_Reset);    
-    #endif
-    #if USE_HARDWARE_I2C
-        void InitI2C        (byte u8_Reset);
-    #endif
-    
-    // Generic PN532 functions
-    void begin();  
-    void SetDebugLevel(byte level);
-    bool SamConfig();
-    bool GetFirmwareVersion(byte* pIcType, byte* pVersionHi, byte* pVersionLo, byte* pFlags);
-    bool WriteGPIO(bool P30, bool P31, bool P33, bool P35);
-    bool SetPassiveActivationRetries();
-    bool DeselectCard();
-    bool ReleaseCard();
-    bool SelectCard();
+  Adafruit_PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss);  // Software SPI
+  Adafruit_PN532(uint8_t irq, uint8_t reset);  // Hardware I2C
+  Adafruit_PN532(uint8_t ss);  // Hardware SPI
+  void begin(void);
+  
+  // Generic PN532 functions
+  bool     SAMConfig(void);
+  uint32_t getFirmwareVersion(void);
+  bool     sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout = 1000);  
+  bool     writeGPIO(uint8_t pinstate);
+  uint8_t  readGPIO(void);
+  bool     setPassiveActivationRetries(uint8_t maxRetries);
+  
+  // ISO14443A functions
+  bool readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, uint8_t * uidLength, uint16_t timeout = 0); //timeout 0 means no timeout - will block forever.
+  bool inDataExchange(uint8_t * send, uint8_t sendLength, uint8_t * response, uint8_t * responseLength);
+  bool inListPassiveTarget();
+  uint8_t AsTarget();
+  uint8_t getDataTarget(uint8_t* cmd, uint8_t* cmdlen);
+  uint8_t setDataTarget(uint8_t * cmd, uint8_t cmdlen);
+  
+  // Mifare Classic functions
+  bool    mifareclassic_IsFirstBlock (uint32_t uiBlock);
+  bool    mifareclassic_IsTrailerBlock (uint32_t uiBlock);
+  uint8_t mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, uint32_t blockNumber, uint8_t keyNumber, uint8_t * keyData);
+  uint8_t mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data);
+  uint8_t mifareclassic_WriteDataBlock (uint8_t blockNumber, uint8_t * data);
+  uint8_t mifareclassic_FormatNDEF (void);
+  uint8_t mifareclassic_WriteNDEFURI (uint8_t sectorNumber, uint8_t uriIdentifier, const char * url);
+  
+  // Mifare Ultralight functions
+  uint8_t mifareultralight_ReadPage (uint8_t page, uint8_t * buffer);
+  uint8_t mifareultralight_WritePage (uint8_t page, uint8_t * data);
 
-    // This function is overridden in Desfire.cpp
-    virtual bool SwitchOffRfField();
-            
-    // ISO14443A functions
-    bool ReadPassiveTargetID(byte* uidBuffer, byte* uidLength, eCardType* pe_CardType);
-
- protected:	
-    // Low Level functions
-    bool CheckPN532Status(byte u8_Status);
-    bool SendCommandCheckAck(byte *cmd, byte cmdlen);    
-    byte ReadData    (byte* buff, byte len);
-    bool ReadPacket  (byte* buff, byte len);
-    void WriteCommand(byte* cmd,  byte cmdlen);
-    void SendPacket  (byte* buff, byte len);
-    bool IsReady();
-    bool WaitReady();
-    bool ReadAck();
-    void SpiWrite(byte c);
-    byte SpiRead(void);
-
-    byte mu8_DebugLevel;   // 0, 1, or 2
-    byte mu8_PacketBuffer[PN532_PACKBUFFSIZE];
+  // NTAG2xx functions
+  uint8_t ntag2xx_ReadPage (uint8_t page, uint8_t * buffer);
+  uint8_t ntag2xx_WritePage (uint8_t page, uint8_t * data);
+  uint8_t ntag2xx_WriteNDEFURI (uint8_t uriIdentifier, char * url, uint8_t dataLen);
+  
+  // Help functions to display formatted text
+  static void PrintHex(const byte * data, const uint32_t numBytes);
+  static void PrintHexChar(const byte * pbtData, const uint32_t numBytes);
 
  private:
-    byte mu8_ClkPin;
-    byte mu8_MisoPin;  
-    byte mu8_MosiPin;  
-    byte mu8_SselPin;  
-    byte mu8_ResetPin;
+  uint8_t _ss, _clk, _mosi, _miso;
+  uint8_t _irq, _reset;
+  uint8_t _uid[7];       // ISO14443A uid
+  uint8_t _uidLen;       // uid len
+  uint8_t _key[6];       // Mifare Classic key
+  uint8_t _inListedTag;  // Tg number of inlisted tag.
+  bool    _usingSPI;     // True if using SPI, false if using I2C.
+  bool    _hardwareSPI;  // True is using hardware SPI, false if using software SPI.
+
+  // Low level communication functions that handle both SPI and I2C.
+  void readdata(uint8_t* buff, uint8_t n);
+  void writecommand(uint8_t* cmd, uint8_t cmdlen);
+  bool isready();
+  bool waitready(uint16_t timeout);
+  bool readack();
+
+  // SPI-specific functions.
+  void    spi_write(uint8_t c);
+  uint8_t spi_read(void);
+
+  // Note there are i2c_read and i2c_write inline functions defined in the .cpp file.
 };
 
 #endif

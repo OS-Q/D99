@@ -1,1179 +1,1862 @@
+#if ARDUINO >= 100
+ #include "Arduino.h"
+#else
+ #include "WProgram.h"
+#endif
+
+#include <Wire.h>
+#if defined(__AVR__) || defined(__i386__) || defined(ARDUINO_ARCH_SAMD) || defined(ESP8266) || defined(ARDUINO_ARCH_STM32)
+ #define WIRE Wire
+#else // Arduino Due
+ #define WIRE Wire1
+#endif
+
+#include <SPI.h>
 #include "PN532.h"
 
-/**************************************************************************
-    Constructor
-**************************************************************************/
-PN532::PN532()
+byte pn532ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+byte pn532response_firmwarevers[] = {0x00, 0xFF, 0x06, 0xFA, 0xD5, 0x03};
+
+// Uncomment these lines to enable debug output for PN532(SPI) and/or MIFARE related code
+// #define PN532DEBUG
+// #define MIFAREDEBUG
+
+// If using Native Port on Arduino Zero or Due define as SerialUSB
+#define PN532DEBUGPRINT Serial
+//#define PN532DEBUGPRINT SerialUSB
+
+// Hardware SPI-specific configuration:
+#ifdef SPI_HAS_TRANSACTION
+    #define PN532_SPI_SETTING SPISettings(1000000, LSBFIRST, SPI_MODE0)
+#else
+    #define PN532_SPI_CLOCKDIV SPI_CLOCK_DIV16
+#endif
+
+#define PN532_PACKBUFFSIZ 64
+byte pn532_packetbuffer[PN532_PACKBUFFSIZ];
+
+#ifndef _BV
+    #define _BV(bit) (1<<(bit))
+#endif
+
+/**************************************************************************/
+/*!
+    @brief  Sends a single byte via I2C
+
+    @param  x    The byte to send
+*/
+/**************************************************************************/
+static inline void i2c_send(uint8_t x)
 {
-    mu8_ClkPin     = 0;
-    mu8_MisoPin    = 0;  
-    mu8_MosiPin    = 0;  
-    mu8_SselPin    = 0;  
-    mu8_ResetPin   = 0;
+  #if ARDUINO >= 100
+    WIRE.write((uint8_t)x);
+  #else
+    WIRE.send(x);
+  #endif
 }
 
-/**************************************************************************
-    Initializes for hardware I2C usage.
-    param  reset     The RSTPD_N pin
-**************************************************************************/
-#if USE_HARDWARE_I2C
-    void PN532::InitI2C(byte u8_Reset)
-    {
-        mu8_ResetPin = u8_Reset;
-        Utils::SetPinMode(mu8_ResetPin, OUTPUT);
-    }
-#endif
-
-/**************************************************************************
-    Initializes for software SPI usage.
-    param  clk       SPI clock pin (SCK)
-    param  miso      SPI MISO pin
-    param  mosi      SPI MOSI pin
-    param  sel       SPI chip select pin (CS/SSEL)
-    param  reset     Location of the RSTPD_N pin
-**************************************************************************/
-#if USE_SOFTWARE_SPI
-    void PN532::InitSoftwareSPI(byte u8_Clk, byte u8_Miso, byte u8_Mosi, byte u8_Sel, byte u8_Reset)
-    {
-        mu8_ClkPin     = u8_Clk;
-        mu8_MisoPin    = u8_Miso;
-        mu8_MosiPin    = u8_Mosi;
-        mu8_SselPin    = u8_Sel;
-        mu8_ResetPin   = u8_Reset;
-    
-        Utils::SetPinMode(mu8_ResetPin, OUTPUT);  
-        Utils::SetPinMode(mu8_SselPin,  OUTPUT);
-        Utils::SetPinMode(mu8_ClkPin,   OUTPUT);   
-        Utils::SetPinMode(mu8_MosiPin,  OUTPUT);
-        Utils::SetPinMode(mu8_MisoPin,  INPUT);
-    }
-#endif
-
-/**************************************************************************
-    Initializes for hardware SPI uage.
-    param  sel       SPI chip select pin (CS/SSEL)
-    param  reset     Location of the RSTPD_N pin
-**************************************************************************/
-#if USE_HARDWARE_SPI
-    void PN532::InitHardwareSPI(byte u8_Sel, byte u8_Reset)
-    {
-        mu8_SselPin  = u8_Sel;
-        mu8_ResetPin = u8_Reset;
-    
-        Utils::SetPinMode(mu8_ResetPin, OUTPUT);
-        Utils::SetPinMode(mu8_SselPin,  OUTPUT);
-    }
-#endif
-
-/**************************************************************************
-    Reset the PN532, wake up and start communication
-**************************************************************************/
-void PN532::begin() 
+/**************************************************************************/
+/*!
+    @brief  Reads a single byte via I2C
+*/
+/**************************************************************************/
+static inline uint8_t i2c_recv(void)
 {
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** begin()\r\n");
+  #if ARDUINO >= 100
+    return WIRE.read();
+  #else
+    return WIRE.receive();
+  #endif
+}
 
-    Utils::WritePin(mu8_ResetPin, HIGH);
-    Utils::DelayMilli(10);
-    Utils::WritePin(mu8_ResetPin, LOW);
-    Utils::DelayMilli(400);
-    Utils::WritePin(mu8_ResetPin, HIGH);
-    Utils::DelayMilli(10);  // Small delay required before taking other actions after reset. See datasheet section 12.23, page 209.
-  
-    #if (USE_HARDWARE_SPI || USE_SOFTWARE_SPI) 
-    {
-        #if USE_HARDWARE_SPI
-            SpiClass::Begin(PN532_HARD_SPI_CLOCK);
-        #endif
+/**************************************************************************/
+/*!
+    @brief  Instantiates a new PN532 class using software SPI.
 
-        // Wake up the PN532 (chapter 7.2.11) -> send a sequence of 0x55 (dummy bytes)
-        byte u8_Buffer[20];
-        memset(u8_Buffer, PN532_WAKEUP, sizeof(u8_Buffer));
-        SendPacket(u8_Buffer, sizeof(u8_Buffer));
+    @param  clk       SPI clock pin (SCK)
+    @param  miso      SPI MISO pin
+    @param  mosi      SPI MOSI pin
+    @param  ss        SPI chip select pin (CS/SSEL)
+*/
+/**************************************************************************/
+PN532::PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss):
+  _clk(clk),
+  _miso(miso),
+  _mosi(mosi),
+  _ss(ss),
+  _irq(0),
+  _reset(0),
+  _usingSPI(true),
+  _hardwareSPI(false)
+{
+  pinMode(_ss, OUTPUT);
+  digitalWrite(_ss, HIGH); 
+  pinMode(_clk, OUTPUT);
+  pinMode(_mosi, OUTPUT);
+  pinMode(_miso, INPUT);
+}
 
-        if (mu8_DebugLevel > 1)
-        {
-            Utils::Print("Send WakeUp packet: ");
-            Utils::PrintHexBuf(u8_Buffer, sizeof(u8_Buffer), LF);
-        }
+/**************************************************************************/
+/*!
+    @brief  Instantiates a new PN532 class using I2C.
+
+    @param  irq       Location of the IRQ pin
+    @param  reset     Location of the RSTPD_N pin
+*/
+/**************************************************************************/
+PN532::PN532(uint8_t irq, uint8_t reset):
+  _clk(0),
+  _miso(0),
+  _mosi(0),
+  _ss(0),
+  _irq(irq),
+  _reset(reset),
+  _usingSPI(false),
+  _hardwareSPI(false)
+{
+  pinMode(_irq, INPUT);
+  pinMode(_reset, OUTPUT);
+}
+
+/**************************************************************************/
+/*!
+    @brief  Instantiates a new PN532 class using hardware SPI.
+
+    @param  ss        SPI chip select pin (CS/SSEL)
+*/
+/**************************************************************************/
+PN532::PN532(uint8_t ss):
+  _clk(0),
+  _miso(0),
+  _mosi(0),
+  _ss(ss),
+  _irq(0),
+  _reset(0),
+  _usingSPI(true),
+  _hardwareSPI(true)
+{
+  pinMode(_ss, OUTPUT);
+  digitalWrite(_ss, HIGH); 
+}
+
+/**************************************************************************/
+/*!
+    @brief  Setups the HW
+*/
+/**************************************************************************/
+void PN532::begin() {
+  if (_usingSPI) {
+    // SPI initialization
+    if (_hardwareSPI) {
+      SPI.begin();
+
+      #ifdef SPI_HAS_TRANSACTION
+        SPI.beginTransaction(PN532_SPI_SETTING);
+      #else
+        SPI.setDataMode(SPI_MODE0);
+        SPI.setBitOrder(LSBFIRST);
+        SPI.setClockDivider(PN532_SPI_CLOCKDIV);
+      #endif
     }
-    #elif USE_HARDWARE_I2C
-    {
-        I2cClass::Begin();
-    }
+    digitalWrite(_ss, LOW);
+
+    delay(1000);
+
+    // not exactly sure why but we have to send a dummy command to get synced up
+    pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
+    sendCommandCheckAck(pn532_packetbuffer, 1);
+
+    // ignore response!
+
+    digitalWrite(_ss, HIGH);
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.endTransaction();
     #endif
+  }
+  else {
+    // I2C initialization.
+    WIRE.begin();
+
+    // Reset the PN532
+    digitalWrite(_reset, HIGH);
+    digitalWrite(_reset, LOW);
+    delay(400);
+    digitalWrite(_reset, HIGH);
+    delay(10);  // Small delay required before taking other actions after reset.
+                // See timing diagram on page 209 of the datasheet, section 12.23.
+  }
 }
 
-/**************************************************************************
-    Enable / disable debug output to SerialClass
-    0 = Off, 1 = high level debug, 2 = low level debug (more details)
-**************************************************************************/
-void PN532::SetDebugLevel(byte level)
-{
-    mu8_DebugLevel = level;
-}
+/**************************************************************************/
+/*!
+    @brief  Prints a hexadecimal value in plain characters
 
-/**************************************************************************
-    Gets the firmware version of the PN5xx chip
-    returns:
-    pIcType = Version of the IC. For PN532, this byte is 0x32
-    pVersionHi, pVersionLo = Firmware version
-    pFlags, bit 0 = Support of ISO 14443A
-    pFlags, bit 1 = Support of ISO 14443B
-    pFlags, bit 2 = Support of ISO 18092
-**************************************************************************/
-bool PN532::GetFirmwareVersion(byte* pIcType, byte* pVersionHi, byte* pVersionLo, byte* pFlags) 
+    @param  data      Pointer to the byte data
+    @param  numBytes  Data length in bytes
+*/
+/**************************************************************************/
+void PN532::PrintHex(const byte * data, const uint32_t numBytes)
 {
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** GetFirmwareVersion()\r\n");
-    
-    mu8_PacketBuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 1))
-        return 0;
-
-    byte len = ReadData(mu8_PacketBuffer, 13);
-    if (len != 6 || mu8_PacketBuffer[1] != PN532_COMMAND_GETFIRMWAREVERSION + 1)
+  uint32_t szPos;
+  for (szPos=0; szPos < numBytes; szPos++)
+  {
+    PN532DEBUGPRINT.print(F("0x"));
+    // Append leading 0 for small values
+    if (data[szPos] <= 0xF)
+      PN532DEBUGPRINT.print(F("0"));
+    PN532DEBUGPRINT.print(data[szPos]&0xff, HEX);
+    if ((numBytes > 1) && (szPos != numBytes - 1))
     {
-        Utils::Print("GetFirmwareVersion failed\r\n");
-        return false;
+      PN532DEBUGPRINT.print(F(" "));
     }
-
-    *pIcType    = mu8_PacketBuffer[2];
-    *pVersionHi = mu8_PacketBuffer[3];
-    *pVersionLo = mu8_PacketBuffer[4];
-    *pFlags     = mu8_PacketBuffer[5];    
-    return true;
+  }
+  PN532DEBUGPRINT.println();
 }
 
-/**************************************************************************
-    Configures the SAM (Secure Access Module)
-**************************************************************************/
-bool PN532::SamConfig(void)
+/**************************************************************************/
+/*!
+    @brief  Prints a hexadecimal value in plain characters, along with
+            the char equivalents in the following format
+
+            00 00 00 00 00 00  ......
+
+    @param  data      Pointer to the byte data
+    @param  numBytes  Data length in bytes
+*/
+/**************************************************************************/
+void PN532::PrintHexChar(const byte * data, const uint32_t numBytes)
 {
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** SamConfig()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
-    mu8_PacketBuffer[1] = 0x01; // normal mode;
-    mu8_PacketBuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
-    mu8_PacketBuffer[3] = 0x01; // use IRQ pin!
-  
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 4))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 9);
-    if (len != 2 || mu8_PacketBuffer[1] != PN532_COMMAND_SAMCONFIGURATION + 1)
+  uint32_t szPos;
+  for (szPos=0; szPos < numBytes; szPos++)
+  {
+    // Append leading 0 for small values
+    if (data[szPos] <= 0xF)
+      PN532DEBUGPRINT.print(F("0"));
+    PN532DEBUGPRINT.print(data[szPos], HEX);
+    if ((numBytes > 1) && (szPos != numBytes - 1))
     {
-        Utils::Print("SamConfig failed\r\n");
-        return false;
+      PN532DEBUGPRINT.print(F(" "));
     }
-    return true;
+  }
+  PN532DEBUGPRINT.print(F("  "));
+  for (szPos=0; szPos < numBytes; szPos++)
+  {
+    if (data[szPos] <= 0x1F)
+      PN532DEBUGPRINT.print(F("."));
+    else
+      PN532DEBUGPRINT.print((char)data[szPos]);
+  }
+  PN532DEBUGPRINT.println();
 }
 
-/**************************************************************************
-    Sets the amount of reties that the PN532 tries to activate a target
-**************************************************************************/
-bool PN532::SetPassiveActivationRetries() 
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** SetPassiveActivationRetries()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_RFCONFIGURATION;
-    mu8_PacketBuffer[1] = 5;    // Config item 5 (MaxRetries)
-    mu8_PacketBuffer[2] = 0xFF; // MxRtyATR (default = 0xFF)
-    mu8_PacketBuffer[3] = 0x01; // MxRtyPSL (default = 0x01)
-    mu8_PacketBuffer[4] = 3;    // one retry is enough for Mifare Classic but Desfire is slower (if you modify this, you must also modify PN532_TIMEOUT!)
-    
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 5))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 9);
-    if (len != 2 || mu8_PacketBuffer[1] != PN532_COMMAND_RFCONFIGURATION + 1)
-    {
-        Utils::Print("SetPassiveActivationRetries failed\r\n");
-        return false;
-    }
-    return true;
+/**************************************************************************/
+/*!
+    @brief  Checks the firmware version of the PN5xx chip
+
+    @returns  The chip's firmware version and ID
+*/
+/**************************************************************************/
+uint32_t PN532::getFirmwareVersion(void) {
+  uint32_t response;
+
+  pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
+
+  if (! sendCommandCheckAck(pn532_packetbuffer, 1)) {
+    return 0;
+  }
+
+  // read data packet
+  readdata(pn532_packetbuffer, 12);
+
+  // check some basic stuff
+  if (0 != strncmp((char *)pn532_packetbuffer, (char *)pn532response_firmwarevers, 6)) {
+#ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Firmware doesn't match!"));
+#endif
+    return 0;
+  }
+
+  int offset = _usingSPI ? 6 : 7;  // Skip a response byte when using I2C to ignore extra data.
+  response = pn532_packetbuffer[offset++];
+  response <<= 8;
+  response |= pn532_packetbuffer[offset++];
+  response <<= 8;
+  response |= pn532_packetbuffer[offset++];
+  response <<= 8;
+  response |= pn532_packetbuffer[offset++];
+
+  return response;
 }
 
-/**************************************************************************
-    Turns the RF field off.
-    When the field is on, the PN532 consumes approx 110 mA
-    When the field is off, the PN532 consumes approx 18 mA
-    The RF field is turned on again by ReadPassiveTargetID().
-**************************************************************************/
-bool PN532::SwitchOffRfField() 
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** SwitchOffRfField()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_RFCONFIGURATION;
-    mu8_PacketBuffer[1] = 1; // Config item 1 (RF Field)
-    mu8_PacketBuffer[2] = 0; // Field Off
-    
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 3))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 9);
-    if (len != 2 || mu8_PacketBuffer[1] != PN532_COMMAND_RFCONFIGURATION + 1)
-    {
-        Utils::Print("SwitchOffRfField failed\r\n");
-        return false;
+
+/**************************************************************************/
+/*!
+    @brief  Sends a command and waits a specified period for the ACK
+
+    @param  cmd       Pointer to the command buffer
+    @param  cmdlen    The size of the command in bytes
+    @param  timeout   timeout before giving up
+
+    @returns  1 if everything is OK, 0 if timeout occured before an
+              ACK was recieved
+*/
+/**************************************************************************/
+// default timeout of one second
+bool PN532::sendCommandCheckAck(uint8_t *cmd, uint8_t cmdlen, uint16_t timeout) {
+  uint16_t timer = 0;
+
+  // write the command
+  writecommand(cmd, cmdlen);
+
+  // Wait for chip to say its ready!
+  if (!waitready(timeout)) {
+    return false;
+  }
+
+  #ifdef PN532DEBUG
+    if (!_usingSPI) {
+      PN532DEBUGPRINT.println(F("IRQ received"));
     }
-    return true;
+  #endif
+
+  // read acknowledgement
+  if (!readack()) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("No ACK frame received!"));
+    #endif
+    return false;
+  }
+
+  // For SPI only wait for the chip to be ready again.
+  // This is unnecessary with I2C.
+  if (_usingSPI) {
+    if (!waitready(timeout)) {
+      return false;
+    }
+  }
+
+  return true; // ack'd command
 }
 
 /**************************************************************************/
 /*!
     Writes an 8-bit value that sets the state of the PN532's GPIO pins
 
-    All pins that can not be used as GPIO should ALWAYS be left high
-    (value = 1) or the system will become unstable and a HW reset
-    will be required to recover the PN532.
+    @warning This function is provided exclusively for board testing and
+             is dangerous since it will throw an error if any pin other
+             than the ones marked "Can be used as GPIO" are modified!  All
+             pins that can not be used as GPIO should ALWAYS be left high
+             (value = 1) or the system will become unstable and a HW reset
+             will be required to recover the PN532.
 
-    pinState[0] (01) = P30   Can be used as GPIO
-    pinState[1] (02) = P31   Can be used as GPIO
-    pinState[2] (04) = P32   *** RESERVED (Must be set) ***
-    pinState[3] (08) = P33   Can be used as GPIO
-    pinState[4] (10) = P34   *** RESERVED (Must be set) ***
-    pinState[5] (20) = P35   Can be used as GPIO
+             pinState[0]  = P30     Can be used as GPIO
+             pinState[1]  = P31     Can be used as GPIO
+             pinState[2]  = P32     *** RESERVED (Must be 1!) ***
+             pinState[3]  = P33     Can be used as GPIO
+             pinState[4]  = P34     *** RESERVED (Must be 1!) ***
+             pinState[5]  = P35     Can be used as GPIO
 
-    This function is not used. The original intention was to drive a LED that 
-    is connected to the PN532 board. But the pins deliver so few current 
-    that a connected LED is very dark. (even if connected without resistor!)
-    Additionally the red LED cannot be connected to the PN532 because it should
-    flash if there is a communication error with the PN532. But if there is a
-    communication problem the command WRITEGPIO will never arrive at the PN532
-    and the red LED would never flash.
+    @returns 1 if everything executed properly, 0 for an error
 */
 /**************************************************************************/
-bool PN532::WriteGPIO(bool P30, bool P31, bool P33, bool P35)
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** WriteGPIO()\r\n");
-  
-    byte pinState = (P30 ? PN532_GPIO_P30 : 0) |
-                    (P31 ? PN532_GPIO_P31 : 0) |
-                           PN532_GPIO_P32      |
-                    (P33 ? PN532_GPIO_P33 : 0) |
-                           PN532_GPIO_P34      |
-                    (P35 ? PN532_GPIO_P35 : 0);
+bool PN532::writeGPIO(uint8_t pinstate) {
+  uint8_t errorbit;
 
-    mu8_PacketBuffer[0] = PN532_COMMAND_WRITEGPIO;
-    mu8_PacketBuffer[1] = PN532_GPIO_VALIDATIONBIT | pinState;  // P3 Pins
-    mu8_PacketBuffer[2] = 0x00;                                 // P7 GPIO Pins (not used ... taken by SPI)
-                    
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 3))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 9);
-    if (len != 2 || mu8_PacketBuffer[1] != PN532_COMMAND_WRITEGPIO + 1)
-    {
-        Utils::Print("WriteGPIO failed\r\n");
-        return false;
-    }
-    return true;
+  // Make sure pinstate does not try to toggle P32 or P34
+  pinstate |= (1 << PN532_GPIO_P32) | (1 << PN532_GPIO_P34);
+
+  // Fill command buffer
+  pn532_packetbuffer[0] = PN532_COMMAND_WRITEGPIO;
+  pn532_packetbuffer[1] = PN532_GPIO_VALIDATIONBIT | pinstate;  // P3 Pins
+  pn532_packetbuffer[2] = 0x00;    // P7 GPIO Pins (not used ... taken by SPI)
+
+  #ifdef PN532DEBUG
+    PN532DEBUGPRINT.print(F("Writing P3 GPIO: ")); PN532DEBUGPRINT.println(pn532_packetbuffer[1], HEX);
+  #endif
+
+  // Send the WRITEGPIO command (0x0E)
+  if (! sendCommandCheckAck(pn532_packetbuffer, 3))
+    return 0x0;
+
+  // Read response packet (00 FF PLEN PLENCHECKSUM D5 CMD+1(0x0F) DATACHECKSUM 00)
+  readdata(pn532_packetbuffer, 8);
+
+  #ifdef PN532DEBUG
+    PN532DEBUGPRINT.print(F("Received: "));
+    PrintHex(pn532_packetbuffer, 8);
+    PN532DEBUGPRINT.println();
+  #endif
+
+  int offset = _usingSPI ? 5 : 6;
+  return  (pn532_packetbuffer[offset] == 0x0F);
 }
 
+/**************************************************************************/
+/*!
+    Reads the state of the PN532's GPIO pins
 
-/**************************************************************************
-    Waits for an ISO14443A target to enter the field.
-    If the RF field has been turned off before, this command switches it on.
+    @returns An 8-bit value containing the pin state where:
 
-    param u8_UidBuffer  Pointer to an 8 byte buffer that will be populated with the card's UID (4 or 7 bytes)
-    param pu8_UidLength Pointer to the variable that will hold the length of the card's UID.
-    param pe_CardType   Pointer to the variable that will hold if the card is a Desfire card
-    
-    returns false only on error!
-    returns true and *UidLength = 0 if no card was found
-    returns true and *UidLength > 0 if a card has been read successfully
-**************************************************************************/
-bool PN532::ReadPassiveTargetID(byte* u8_UidBuffer, byte* pu8_UidLength, eCardType* pe_CardType) 
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** ReadPassiveTargetID()\r\n");
+             pinState[0]  = P30
+             pinState[1]  = P31
+             pinState[2]  = P32
+             pinState[3]  = P33
+             pinState[4]  = P34
+             pinState[5]  = P35
+*/
+/**************************************************************************/
+uint8_t PN532::readGPIO(void) {
+  pn532_packetbuffer[0] = PN532_COMMAND_READGPIO;
 
-    *pu8_UidLength = 0;
-    *pe_CardType   = CARD_Unknown;
-    memset(u8_UidBuffer, 0, 8);   
-    mu8_PacketBuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
-    mu8_PacketBuffer[1] = 1;  // read data of 1 card (The PN532 can read max 2 targets at the same time)
-    mu8_PacketBuffer[2] = CARD_TYPE_106KB_ISO14443A; // This function currently does not support other card types.
+  // Send the READGPIO command (0x0C)
+  if (! sendCommandCheckAck(pn532_packetbuffer, 1))
+    return 0x0;
 
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 3))
-        return false; // Error (no valid ACK received or timeout)
-  
-    /* 
-    ISO14443A card response:
-    mu8_PacketBuffer Description
-    -------------------------------------------------------
-    b0               D5 (always) (PN532_PN532TOHOST)
-    b1               4B (always) (PN532_COMMAND_INLISTPASSIVETARGET + 1)
-    b2               Amount of cards found
-    b3               Tag number (always 1)
-    b4,5             SENS_RES (ATQA = Answer to Request Type A)
-    b6               SEL_RES  (SAK  = Select Acknowledge)
-    b7               UID Length
-    b8..Length       UID (4 or 7 bytes)
-    nn               ATS Length     (Desfire only)
-    nn..Length-1     ATS data bytes (Desfire only)
-    */ 
-    byte len = ReadData(mu8_PacketBuffer, 28);
-    if (len < 3 || mu8_PacketBuffer[1] != PN532_COMMAND_INLISTPASSIVETARGET + 1)
+  // Read response packet (00 FF PLEN PLENCHECKSUM D5 CMD+1(0x0D) P3 P7 IO1 DATACHECKSUM 00)
+  readdata(pn532_packetbuffer, 11);
+
+  /* READGPIO response should be in the following format:
+
+    byte            Description
+    -------------   ------------------------------------------
+    b0..5           Frame header and preamble (with I2C there is an extra 0x00)
+    b6              P3 GPIO Pins
+    b7              P7 GPIO Pins (not used ... taken by SPI)
+    b8              Interface Mode Pins (not used ... bus select pins)
+    b9..10          checksum */
+
+  int p3offset = _usingSPI ? 6 : 7;
+
+  #ifdef PN532DEBUG
+    PN532DEBUGPRINT.print(F("Received: "));
+    PrintHex(pn532_packetbuffer, 11);
+    PN532DEBUGPRINT.println();
+    PN532DEBUGPRINT.print(F("P3 GPIO: 0x")); PN532DEBUGPRINT.println(pn532_packetbuffer[p3offset],   HEX);
+    PN532DEBUGPRINT.print(F("P7 GPIO: 0x")); PN532DEBUGPRINT.println(pn532_packetbuffer[p3offset+1], HEX);
+    PN532DEBUGPRINT.print(F("IO GPIO: 0x")); PN532DEBUGPRINT.println(pn532_packetbuffer[p3offset+2], HEX);
+    // Note: You can use the IO GPIO value to detect the serial bus being used
+    switch(pn532_packetbuffer[p3offset+2])
     {
-        Utils::Print("ReadPassiveTargetID failed\r\n");
-        return false;
-    }   
-
-    byte cardsFound = mu8_PacketBuffer[2]; 
-    if (mu8_DebugLevel > 0)
-    {
-        Utils::Print("Cards found: "); 
-        Utils::PrintDec(cardsFound, LF); 
+      case 0x00:    // Using UART
+        PN532DEBUGPRINT.println(F("Using UART (IO = 0x00)"));
+        break;
+      case 0x01:    // Using I2C
+        PN532DEBUGPRINT.println(F("Using I2C (IO = 0x01)"));
+        break;
+      case 0x02:    // Using SPI
+        PN532DEBUGPRINT.println(F("Using SPI (IO = 0x02)"));
+        break;
     }
-    if (cardsFound != 1)
-        return true; // no card found -> this is not an error!
+  #endif
 
-    byte u8_IdLength = mu8_PacketBuffer[7];
-    if (u8_IdLength != 4 && u8_IdLength != 7)
-    {
-        Utils::Print("Card has unsupported UID length: ");
-        Utils::PrintDec(u8_IdLength, LF); 
-        return true; // unsupported card found -> this is not an error!
-    }   
-
-    memcpy(u8_UidBuffer, mu8_PacketBuffer + 8, u8_IdLength);    
-    *pu8_UidLength = u8_IdLength;
-
-    // See "Mifare Identification & Card Types.pdf" in the ZIP file
-    uint16_t u16_ATQA = ((uint16_t)mu8_PacketBuffer[4] << 8) | mu8_PacketBuffer[5];
-    byte     u8_SAK   = mu8_PacketBuffer[6];
-
-    if (u8_IdLength == 7 && u8_UidBuffer[0] != 0x80 && u16_ATQA == 0x0344 && u8_SAK == 0x20) *pe_CardType = CARD_Desfire;
-    if (u8_IdLength == 4 && u8_UidBuffer[0] == 0x80 && u16_ATQA == 0x0304 && u8_SAK == 0x20) *pe_CardType = CARD_DesRandom;
-    
-    if (mu8_DebugLevel > 0)
-    {
-        Utils::Print("Card UID:    ");
-        Utils::PrintHexBuf(u8_UidBuffer, u8_IdLength, LF);
-
-        // Examples:              ATQA    SAK  UID length
-        // MIFARE Mini            00 04   09   4 bytes
-        // MIFARE Mini            00 44   09   7 bytes
-        // MIFARE Classic 1k      00 04   08   4 bytes
-        // MIFARE Classic 4k      00 02   18   4 bytes
-        // MIFARE Ultralight      00 44   00   7 bytes
-        // MIFARE DESFire Default 03 44   20   7 bytes
-        // MIFARE DESFire Random  03 04   20   4 bytes
-        // See "Mifare Identification & Card Types.pdf"
-        char s8_Buf[80];
-        sprintf(s8_Buf, "Card Type:   ATQA= 0x%04X, SAK= 0x%02X", u16_ATQA, u8_SAK);
-
-        if (*pe_CardType == CARD_Desfire)   strcat(s8_Buf, " (Desfire Default)");
-        if (*pe_CardType == CARD_DesRandom) strcat(s8_Buf, " (Desfire RandomID)");
-            
-        Utils::Print(s8_Buf, LF);
-    }
-    return true;
+  return pn532_packetbuffer[p3offset];
 }
 
-/**************************************************************************
-    The goal of this command is to select the target. (Initialization, anti-collision loop and Selection)
-    If the target is already selected, no action is performed and Status OK is returned. 
-**************************************************************************/
-bool PN532::SelectCard()
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** SelectCard()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_INSELECT;
-    mu8_PacketBuffer[1] = 1; // Target 1
+/**************************************************************************/
+/*!
+    @brief  Configures the SAM (Secure Access Module)
+*/
+/**************************************************************************/
+bool PN532::SAMConfig(void) {
+  pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
+  pn532_packetbuffer[1] = 0x01; // normal mode;
+  pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
+  pn532_packetbuffer[3] = 0x01; // use IRQ pin!
 
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 2))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 10);
-    if (len < 3 || mu8_PacketBuffer[1] != PN532_COMMAND_INSELECT + 1)
-    {
-        Utils::Print("Select failed\r\n");
-        return false;
-    }
+  if (! sendCommandCheckAck(pn532_packetbuffer, 4))
+    return false;
 
-    return CheckPN532Status(mu8_PacketBuffer[2]);
+  // read data packet
+  readdata(pn532_packetbuffer, 8);
+
+  int offset = _usingSPI ? 5 : 6;
+  return  (pn532_packetbuffer[offset] == 0x15);
 }
 
-/**************************************************************************
-    The goal of this command is to deselect the target. 
-    The PN532 keeps all the information relative to this target (also certain error status).  
-    This function is required due to a stupid behaviour with Mifare Classic:
-    When AuthenticateDataBlock() has failed for a sector, you also get an
-    authentication error for the next sector although you have passed the correct key.
-    So, after an authentication error you must first deselect the card before
-    authenticating a new sector!
-**************************************************************************/
-bool PN532::DeselectCard()
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** DeselectCard()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_INDESELECT;
-    mu8_PacketBuffer[1] = 0; // Deselect all cards
+/**************************************************************************/
+/*!
+    Sets the MxRtyPassiveActivation byte of the RFConfiguration register
 
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 2))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 10);
-    if (len < 3 || mu8_PacketBuffer[1] != PN532_COMMAND_INDESELECT + 1)
-    {
-        Utils::Print("Deselect failed\r\n");
-        return false;
-    }
+    @param  maxRetries    0xFF to wait forever, 0x00..0xFE to timeout
+                          after mxRetries
 
-    return CheckPN532Status(mu8_PacketBuffer[2]);
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+bool PN532::setPassiveActivationRetries(uint8_t maxRetries) {
+  pn532_packetbuffer[0] = PN532_COMMAND_RFCONFIGURATION;
+  pn532_packetbuffer[1] = 5;    // Config item 5 (MaxRetries)
+  pn532_packetbuffer[2] = 0xFF; // MxRtyATR (default = 0xFF)
+  pn532_packetbuffer[3] = 0x01; // MxRtyPSL (default = 0x01)
+  pn532_packetbuffer[4] = maxRetries;
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Setting MxRtyPassiveActivation to ")); PN532DEBUGPRINT.print(maxRetries, DEC); PN532DEBUGPRINT.println(F(" "));
+  #endif
+
+  if (! sendCommandCheckAck(pn532_packetbuffer, 5))
+    return 0x0;  // no ACK
+
+  return 1;
 }
 
-/**************************************************************************
-    The goal of this command is to release the target.
-    Releasing a target means that the host controller has finished the communication with 
-    the target, so the PN532 erases all the information relative to it. 
-**************************************************************************/
-bool PN532::ReleaseCard()
-{
-    if (mu8_DebugLevel > 0) Utils::Print("\r\n*** ReleaseCard()\r\n");
-  
-    mu8_PacketBuffer[0] = PN532_COMMAND_INRELEASE;
-    mu8_PacketBuffer[1] = 0; // Deselect all cards
+/***** ISO14443A Commands ******/
 
-    if (!SendCommandCheckAck(mu8_PacketBuffer, 2))
-        return false;
-  
-    byte len = ReadData(mu8_PacketBuffer, 10);
-    if (len < 3 || mu8_PacketBuffer[1] != PN532_COMMAND_INRELEASE + 1)
-    {
-        Utils::Print("Release failed\r\n");
-        return false;
-    }
+/**************************************************************************/
+/*!
+    Waits for an ISO14443A target to enter the field
 
-    return CheckPN532Status(mu8_PacketBuffer[2]);
-}
+    @param  cardBaudRate  Baud rate of the card
+    @param  uid           Pointer to the array that will be populated
+                          with the card's UID (up to 7 bytes)
+    @param  uidLength     Pointer to the variable that will hold the
+                          length of the card's UID.
 
-/**************************************************************************
-    This function is private
-    It checks the status byte that is returned by some commands.
-    See chapter 7.1 in the manual.
-    u8_Status = the status byte
-**************************************************************************/
-bool PN532::CheckPN532Status(byte u8_Status)
-{
-    // Bits 0...5 contain the error code.
-    u8_Status &= 0x3F;
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+bool PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, uint8_t * uidLength, uint16_t timeout) {
+  pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
+  pn532_packetbuffer[1] = 1;  // max 1 cards at once (we can set this to 2 later)
+  pn532_packetbuffer[2] = cardbaudrate;
 
-    if (u8_Status == 0)
-        return true;
-
-    char s8_Buf[50];
-    sprintf(s8_Buf, "PN532 Error 0x%02X: ", u8_Status);
-    Utils::Print(s8_Buf);
-
-    switch (u8_Status)
-    {
-        case 0x01: 
-            Utils::Print("Timeout\r\n");
-            return false;
-        case 0x02: 
-            Utils::Print("CRC error\r\n");
-            return false;
-        case 0x03: 
-            Utils::Print("Parity error\r\n");
-            return false;
-        case 0x04: 
-            Utils::Print("Wrong bit count during anti-collision\r\n");
-            return false;
-        case 0x05: 
-            Utils::Print("Framing error\r\n");
-            return false;
-        case 0x06: 
-            Utils::Print("Abnormal bit collision\r\n");
-            return false;
-        case 0x07: 
-            Utils::Print("Insufficient communication buffer\r\n");
-            return false;
-        case 0x09: 
-            Utils::Print("RF buffer overflow\r\n");
-            return false;
-        case 0x0A: 
-            Utils::Print("RF field has not been switched on\r\n");
-            return false;
-        case 0x0B: 
-            Utils::Print("RF protocol error\r\n");
-            return false;
-        case 0x0D: 
-            Utils::Print("Overheating\r\n");
-            return false;
-        case 0x0E: 
-            Utils::Print("Internal buffer overflow\r\n");
-            return false;
-        case 0x10: 
-            Utils::Print("Invalid parameter\r\n");
-            return false;
-        case 0x12: 
-            Utils::Print("Command not supported\r\n");
-            return false;
-        case 0x13: 
-            Utils::Print("Wrong data format\r\n");
-            return false;
-        case 0x14:
-            Utils::Print("Authentication error\r\n");
-            return false;
-        case 0x23:
-            Utils::Print("Wrong UID check byte\r\n");
-            return false;
-        case 0x25:
-            Utils::Print("Invalid device state\r\n");
-            return false;
-        case 0x26:
-            Utils::Print("Operation not allowed\r\n");
-            return false;
-        case 0x27:
-            Utils::Print("Command not acceptable\r\n");
-            return false;
-        case 0x29:
-            Utils::Print("Target has been released\r\n");
-            return false;
-        case 0x2A:
-            Utils::Print("Card has been exchanged\r\n");
-            return false;
-        case 0x2B:
-            Utils::Print("Card has disappeared\r\n");
-            return false;
-        case 0x2C:
-            Utils::Print("NFCID3 initiator/target mismatch\r\n");
-            return false;
-        case 0x2D:
-            Utils::Print("Over-current\r\n");
-            return false;
-        case 0x2E:
-            Utils::Print("NAD msssing\r\n");
-            return false;
-        default:
-            Utils::Print("Undocumented error\r\n");
-            return false;
-    }
-}
-
-// ########################################################################
-// ####                      LOW LEVEL FUNCTIONS                      #####
-// ########################################################################
-
-
-/**************************************************************************
-    Return true if the PN532 is ready with a response.
-**************************************************************************/
-bool PN532::IsReady() 
-{
-    #if (USE_HARDWARE_SPI || USE_SOFTWARE_SPI) 
-    {
-        Utils::WritePin(mu8_SselPin, LOW);
-        Utils::DelayMilli(2); // INDISPENSABLE!! Otherwise reads bullshit
-
-        if (mu8_DebugLevel > 2) Utils::Print("IsReady(): write STATUSREAD\r\n");
-
-        SpiWrite(PN532_SPI_STATUSREAD);
-        byte u8_Ready = SpiRead();
-
-        if (mu8_DebugLevel > 2)
-        {
-            Utils::Print("IsReady(): read ");
-            Utils::PrintHex8(u8_Ready, LF);
-        }
-    
-        Utils::WritePin(mu8_SselPin, HIGH);
-        Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-        
-        return u8_Ready == PN532_SPI_READY; // 0x01
-    }
-    #elif USE_HARDWARE_I2C
-    { 
-        // After reading this byte, the bus must be released with a Stop condition
-        I2cClass::RequestFrom((byte)PN532_I2C_ADDRESS, (byte)1);
-
-        // PN532 Manual chapter 6.2.4: Before the data bytes the chip sends a Ready byte.
-        byte u8_Ready = I2cClass::Read();
-        if (mu8_DebugLevel > 2)
-        {
-            Utils::Print("IsReady(): read ");
-            Utils::PrintHex8(u8_Ready, LF);
-        }        
-        
-        return u8_Ready == PN532_I2C_READY; // 0x01
-    }
+  if (!sendCommandCheckAck(pn532_packetbuffer, 3, timeout))
+  {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("No card(s) read"));
     #endif
-}
+    return 0x0;  // no cards read
+  }
 
-/**************************************************************************
-    Waits until the PN532 is ready.
-**************************************************************************/
-bool PN532::WaitReady() 
-{
-    uint16_t timer = 0;
-    while (!IsReady()) 
-    {
-        if (timer >= PN532_TIMEOUT) 
-        {
-            if (mu8_DebugLevel > 0) Utils::Print("WaitReady() -> TIMEOUT\r\n");
-            return false;
-        }
-        Utils::DelayMilli(10);
-        timer += 10;        
-    }
-    return true;
-}
-
-/**************************************************************************
-    Sends a command and waits a specified period for the ACK
-    param cmd       Pointer to the command buffer
-    param cmdlen    The size of the command in bytes
-
-    returns  true  if everything is OK, 
-             false if timeout occured before an ACK was recieved
-**************************************************************************/
-bool PN532::SendCommandCheckAck(byte *cmd, byte cmdlen) 
-{
-    WriteCommand(cmd, cmdlen);
-    return ReadAck();
-}
-
-/**************************************************************************
-    Writes a command to the PN532, inserting the
-    preamble and required frame details (checksum, len, etc.)
-
-    param  cmd       Command buffer
-    param  cmdlen    Command length in bytes
-**************************************************************************/
-void PN532::WriteCommand(byte* cmd, byte cmdlen)
-{
-    byte TxBuffer[PN532_PACKBUFFSIZE + 10];
-    int P=0;
-    TxBuffer[P++] = PN532_PREAMBLE;    // 00
-    TxBuffer[P++] = PN532_STARTCODE1;  // 00
-    TxBuffer[P++] = PN532_STARTCODE2;  // FF
-    TxBuffer[P++] = cmdlen + 1;
-    TxBuffer[P++] = 0xFF - cmdlen;
-    TxBuffer[P++] = PN532_HOSTTOPN532; // D4
-    
-    for (byte i=0; i<cmdlen; i++) 
-    {
-        TxBuffer[P++] = cmd[i];
-    }
-
-    byte checksum = 0;
-    for (byte i=0; i<P; i++) 
-    {
-       checksum += TxBuffer[i];
-    }
-
-    TxBuffer[P++] = ~checksum;
-    TxBuffer[P++] = PN532_POSTAMBLE; // 00
-
-    SendPacket(TxBuffer, P);
-   
-    if (mu8_DebugLevel > 1)
-    {
-        Utils::Print("Sending:  ");
-        Utils::PrintHexBuf(TxBuffer, P, LF, 5, cmdlen + 6);
-    }
-}
-
-/**************************************************************************
-    Send a data packet
-**************************************************************************/
-void PN532::SendPacket(byte* buff, byte len)
-{
-    #if (USE_HARDWARE_SPI || USE_SOFTWARE_SPI) 
-    {
-        Utils::WritePin(mu8_SselPin, LOW);
-        Utils::DelayMilli(2);  // INDISPENSABLE!!
-
-        if (mu8_DebugLevel > 2) Utils::Print("WriteCommand(): write DATAWRITE\r\n");
-        SpiWrite(PN532_SPI_DATAWRITE);
-
-        for (byte i=0; i<len; i++) 
-        {
-            SpiWrite(buff[i]);
-        }
-
-        Utils::WritePin(mu8_SselPin, HIGH);
-        Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-    }
-    #elif USE_HARDWARE_I2C
-    {
-        Utils::DelayMilli(2); // delay is for waking up the board
-    
-        I2cClass::BeginTransmission(PN532_I2C_ADDRESS);
-        for (byte i=0; i<len; i++) 
-        {
-            I2cClass::Write(buff[i]);
-        }   
-        I2cClass::EndTransmission();
-    }
+  // wait for a card to enter the field (only possible with I2C)
+  if (!_usingSPI) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Waiting for IRQ (indicates card presence)"));
     #endif
-}
-
-/**************************************************************************
-    Read the ACK packet (acknowledge)
-**************************************************************************/
-bool PN532::ReadAck() 
-{
-    const byte Ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
-    byte ackbuff[sizeof(Ack)];
-    
-    // ATTENTION: Never read more than 6 bytes here!
-    // The PN532 has a bug in SPI mode which results in the first byte of the response missing if more than 6 bytes are read here!
-    if (!ReadPacket(ackbuff, sizeof(ackbuff)))
-        return false; // Timeout
-
-    if (mu8_DebugLevel > 2)
-    {
-        Utils::Print("Read ACK: ");
-        Utils::PrintHexBuf(ackbuff, sizeof(ackbuff), LF);
+    if (!waitready(timeout)) {
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.println(F("IRQ Timeout"));
+      #endif
+      return 0x0;
     }
-    
-    if (memcmp(ackbuff, Ack, sizeof(Ack)) != 0)
-    {
-        Utils::Print("*** No ACK frame received\r\n");
-        return false;
-    }
-    return true;
-}
+  }
 
-/**************************************************************************
-    Reads n bytes of data from the PN532 via SPI or I2C and checks for valid data.
-    param  buff      Pointer to the buffer where data will be written
-    param  len       Number of bytes to read
-    returns the number of bytes that have been copied to buff (< len) or 0 on error
-**************************************************************************/
-byte PN532::ReadData(byte* buff, byte len) 
-{ 
-    byte RxBuffer[PN532_PACKBUFFSIZE];
-        
-    const byte MIN_PACK_LEN = 2 /*start bytes*/ + 2 /*length + length checksum */ + 1 /*checksum*/;
-    if (len < MIN_PACK_LEN || len > PN532_PACKBUFFSIZE)
-    {
-        Utils::Print("ReadData(): len is invalid\r\n");
-        return 0;
-    }
-    
-    if (!ReadPacket(RxBuffer, len))
-        return 0; // timeout
+  // read data packet
+  readdata(pn532_packetbuffer, 20);
+  // check some basic stuff
 
-    // The following important validity check was completely missing in Adafruit code (added by Elmü)
-    // PN532 documentation says (chapter 6.2.1.6): 
-    // Before the start code (0x00 0xFF) there may be any number of additional bytes that must be ignored.
-    // After the checksum there may be any number of additional bytes that must be ignored.
-    // This function returns ONLY the pure data bytes:
-    // any leading bytes -> skipped (never seen, but documentation says to ignore them)
-    // preamble   0x00   -> skipped (optional, the PN532 does not send it always!!!!!)
-    // start code 0x00   -> skipped
-    // start code 0xFF   -> skipped
-    // length            -> skipped
-    // length checksum   -> skipped
-    // data[0...n]       -> returned to the caller (first byte is always 0xD5)
-    // checksum          -> skipped
-    // postamble         -> skipped (optional, the PN532 may not send it!)
-    // any bytes behind  -> skipped (never seen, but documentation says to ignore them)
+  /* ISO14443A card response should be in the following format:
 
-    const char* Error = NULL;
-    int Brace1 = -1;
-    int Brace2 = -1;
-    int dataLength = 0;
-    do
-    {
-        int startCode = -1;
-        for (int i=0; i<=len-MIN_PACK_LEN; i++)
-        {
-            if (RxBuffer[i]   == PN532_STARTCODE1 && 
-                RxBuffer[i+1] == PN532_STARTCODE2)
-            {
-                startCode = i;
-                break;
-            }
-        }
+    byte            Description
+    -------------   ------------------------------------------
+    b0..6           Frame header and preamble
+    b7              Tags Found
+    b8              Tag Number (only one used in this example)
+    b9..10          SENS_RES
+    b11             SEL_RES
+    b12             NFCID Length
+    b13..NFCIDLen   NFCID                                      */
 
-        if (startCode < 0)
-        {
-            Error = "ReadData() -> No Start Code\r\n";
-            break;
-        }
-        
-        int pos = startCode + 2;
-        dataLength      = RxBuffer[pos++];
-        int lengthCheck = RxBuffer[pos++];
-        if ((dataLength + lengthCheck) != 0x100)
-        {
-            Error = "ReadData() -> Invalid length checksum\r\n";
-            break;
-        }
-    
-        if (len < startCode + MIN_PACK_LEN + dataLength)
-        {
-            Error = "ReadData() -> Packet is longer than requested length\r\n";
-            break;
-        }
-
-        Brace1 = pos;
-        for (int i=0; i<dataLength; i++)
-        {
-            buff[i] = RxBuffer[pos++]; // copy the pure data bytes in the packet
-        }
-        Brace2 = pos;
-
-        // All returned data blocks must start with PN532TOHOST (0xD5)
-        if (dataLength < 1 || buff[0] != PN532_PN532TOHOST) 
-        {
-            Error = "ReadData() -> Invalid data (no PN532TOHOST)\r\n";
-            break;
-        }
-    
-        byte checkSum = 0;
-        for (int i=startCode; i<pos; i++)
-        {
-            checkSum += RxBuffer[i];
-        }
-    
-        if (checkSum != (byte)(~RxBuffer[pos]))
-        {
-            Error = "ReadData() -> Invalid checksum\r\n";
-            break;
-        }
-    }
-    while(false); // This is not a loop. Avoids using goto by using break.
-
-    // Always print the package, even if it was invalid.
-    if (mu8_DebugLevel > 1)
-    {
-        Utils::Print("Response: ");
-        Utils::PrintHexBuf(RxBuffer, len, LF, Brace1, Brace2);
-    }
-    
-    if (Error)
-    {
-        Utils::Print(Error);
-        return 0;
-    }
-
-    return dataLength;
-}
-
-/**************************************************************************
-    Reads n bytes of data from the PN532 via SPI or I2C and does NOT check for valid data.
-    param  buff      Pointer to the buffer where data will be written
-    param  len       Number of bytes to read
-**************************************************************************/
-bool PN532::ReadPacket(byte* buff, byte len)
-{ 
-    if (!WaitReady())
-        return false;
-        
-    #if (USE_HARDWARE_SPI || USE_SOFTWARE_SPI) 
-    {
-        Utils::WritePin(mu8_SselPin, LOW);
-        Utils::DelayMilli(2); // INDISPENSABLE!! Otherwise reads bullshit
-
-        if (mu8_DebugLevel > 2)  Utils::Print("ReadPacket(): write DATAREAD\r\n");
-        SpiWrite(PN532_SPI_DATAREAD);
-    
-        for (byte i=0; i<len; i++) 
-        {
-            Utils::DelayMilli(1);
-            buff[i] = SpiRead();
-        }
-    
-        Utils::WritePin(mu8_SselPin, HIGH);
-        Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-        return true;
-    }
-    #elif USE_HARDWARE_I2C
-    {
-        Utils::DelayMilli(2);
-    
-        // read (n+1 to take into account leading Ready byte)
-        I2cClass::RequestFrom((byte)PN532_I2C_ADDRESS, (byte)(len+1));
-
-        // PN532 Manual chapter 6.2.4: Before the data bytes the chip sends a Ready byte.
-        // It is ignored here because it has been checked already in isready()
-        byte u8_Ready = I2cClass::Read();
-        if (mu8_DebugLevel > 2)
-        {
-            Utils::Print("ReadPacket(): read ");
-            Utils::PrintHex8(u8_Ready, LF);
-        }        
-        
-        for (byte i=0; i<len; i++) 
-        {
-            Utils::DelayMilli(1);
-            buff[i] = I2cClass::Read();
-        }
-        return true;
-    }
-    #endif
-}
-
-/**************************************************************************
-    SPI write one byte
-**************************************************************************/
-void PN532::SpiWrite(byte c) 
-{
-    #if USE_HARDWARE_SPI
-    {
-        SpiClass::Transfer(c);
-    }
-    #elif USE_SOFTWARE_SPI
-    {
-        Utils::WritePin(mu8_ClkPin, HIGH);
-        Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-    
-        for (int i=1; i<=128; i<<=1) 
-        {
-            Utils::WritePin(mu8_ClkPin, LOW);
-            Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-            
-            byte level = (c & i) ? HIGH : LOW;
-            Utils::WritePin(mu8_MosiPin, level);
-            Utils::DelayMicro(PN532_SOFT_SPI_DELAY);        
-      
-            Utils::WritePin(mu8_ClkPin, HIGH);
-            Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-        }
-    }
-    #endif
-}
-
-/**************************************************************************
-    SPI read one byte
-**************************************************************************/
-byte PN532::SpiRead(void) 
-{
-    #if USE_HARDWARE_SPI 
-    {
-        return SpiClass::Transfer(0x00);
-    }
-    #elif USE_SOFTWARE_SPI
-    {
-        Utils::WritePin(mu8_ClkPin, HIGH);
-        Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-
-        int x=0;    
-        for (int i=1; i<=128; i<<=1) 
-        {
-            if (Utils::ReadPin(mu8_MisoPin)) 
-            {
-                x |= i;
-            }
-            Utils::WritePin(mu8_ClkPin, LOW);
-            Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-            Utils::WritePin(mu8_ClkPin, HIGH);
-            Utils::DelayMicro(PN532_SOFT_SPI_DELAY);
-        }
-        return x;
-    }
-    #else
-    {
-        return 0; // This code will never execute. Just for the compiler not to complain.
-    }
-    #endif
-}
-
-void Utils::Print(const char* s8_Text, const char* s8_LF) //=NULL
-{
-    SerialClass::Print(s8_Text);
-    if (s8_LF) 
-        SerialClass::Print(s8_LF);
-}
-void Utils::PrintDec(int s32_Data, const char* s8_LF) // =NULL
-{
-    char s8_Buf[20];
-    sprintf(s8_Buf, "%d", s32_Data);
-    Print(s8_Buf, s8_LF);
-}
-void Utils::PrintHex8(byte u8_Data, const char* s8_LF) // =NULL
-{
-    char s8_Buf[20];
-    sprintf(s8_Buf, "%02X", u8_Data);
-    Print(s8_Buf, s8_LF);
-}
-void Utils::PrintHex16(uint16_t u16_Data, const char* s8_LF) // =NULL
-{
-    char s8_Buf[20];
-    sprintf(s8_Buf, "%04X", u16_Data);
-    Print(s8_Buf, s8_LF);
-}
-void Utils::PrintHex32(uint32_t u32_Data, const char* s8_LF) // =NULL
-{
-    char s8_Buf[20];
-    sprintf(s8_Buf, "%08X", (unsigned int)u32_Data);
-    Print(s8_Buf, s8_LF);
-}
-
-// Prints a hexadecimal buffer as 2 digit HEX numbers
-// At the byte position s32_Brace1 a "<" will be inserted
-// At the byte position s32_Brace2 a ">" will be inserted
-// Output will look like: "00 00 FF 03 FD <D5 4B 00> E0 00"
-// This is used to mark the data bytes in the packet.
-// If the parameters s32_Brace1, s32_Brace2 are -1, they do not appear
-void Utils::PrintHexBuf(const byte* u8_Data, const uint32_t u32_DataLen, const char* s8_LF, int s32_Brace1, int s32_Brace2)
-{
-    for (uint32_t i=0; i < u32_DataLen; i++)
-    {
-        if ((int)i == s32_Brace1)
-            Print(" <");
-        else if ((int)i == s32_Brace2)
-            Print("> ");
-        else if (i > 0)
-            Print(" ");
-        
-        PrintHex8(u8_Data[i]);
-    }
-    if (s8_LF) Print(s8_LF);
-}
-
-// Converts an interval in milliseconds into days, hours, minutes and prints it
-void Utils::PrintInterval(uint64_t u64_Time, const char* s8_LF)
-{
-    char Buf[30];
-    u64_Time /= 60*1000;
-    int s32_Min  = (int)(u64_Time % 60);
-    u64_Time /= 60;
-    int s32_Hour = (int)(u64_Time % 24);    
-    u64_Time /= 24;
-    int s32_Days = (int)u64_Time;    
-    sprintf(Buf, "%d days, %02d:%02d hours", s32_Days, s32_Hour, s32_Min);
-    Print(Buf, s8_LF);   
-}
-
-// We need a special time counter that does not roll over after 49 days (as millis() does) 
-uint64_t Utils::GetMillis64()
-{
-    static uint32_t u32_High = 0;
-    static uint32_t u32_Last = 0;
-
-    uint32_t u32_Now = GetMillis(); // starts at zero after CPU reset
-
-    // Check for roll-over
-    if (u32_Now < u32_Last) u32_High ++;
-    u32_Last = u32_Now;
-
-    uint64_t u64_Time = u32_High;
-    u64_Time <<= 32;
-    u64_Time |= u32_Now;
-    return u64_Time;
-}
-
-// Multi byte XOR operation In -> Out
-// If u8_Out and u8_In are the same buffer use the other function below.
-void Utils::XorDataBlock(byte* u8_Out, const byte* u8_In, const byte* u8_Xor, int s32_Length)
-{
-    for (int B=0; B<s32_Length; B++)
-    {
-        u8_Out[B] = u8_In[B] ^ u8_Xor[B];
-    }
-}
-
-// Multi byte XOR operation in the same buffer
-void Utils::XorDataBlock(byte* u8_Data, const byte* u8_Xor, int s32_Length)
-{
-    for (int B=0; B<s32_Length; B++)
-    {
-        u8_Data[B] ^= u8_Xor[B];
-    }
-}
-
-// Rotate a block of 8 byte to the left by one byte.
-// ATTENTION: u8_Out and u8_In must not be the same buffer!
-void Utils::RotateBlockLeft(byte* u8_Out, const byte* u8_In, int s32_Length)
-{
-    int s32_Last = s32_Length -1;
-    memcpy(u8_Out, u8_In + 1, s32_Last);
-    u8_Out[s32_Last] = u8_In[0];
-}
-
-// Logical Bit Shift Left. Shift MSB out, and place a 0 at LSB position
-void Utils::BitShiftLeft(uint8_t* u8_Data, int s32_Length)
-{
-    for (int n=0; n<s32_Length-1; n++) 
-    {
-        u8_Data[n] = (u8_Data[n] << 1) | (u8_Data[n+1] >> 7);
-    }
-    u8_Data[s32_Length - 1] <<= 1;
-}
-
-// Generate multi byte random
-void Utils::GenerateRandom(byte* u8_Random, int s32_Length)
-{
-    uint32_t u32_Now = GetMillis();
-    for (int i=0; i<s32_Length; i++)
-    {
-        u8_Random[i] = (byte)u32_Now;
-        u32_Now *= 127773;
-        u32_Now += 16807;
-    }
-}
-
-// ITU-V.41 (ISO 14443A)
-// This CRC is used only for legacy authentication. (not implemented anymore)
-uint16_t Utils::CalcCrc16(const byte* u8_Data, int s32_Length)
-{
-    uint16_t u16_Crc = 0x6363;
-    for (int i=0; i<s32_Length; i++)
-    {
-        byte ch = u8_Data[i];
-        ch = ch ^ (byte)u16_Crc;
-        ch = ch ^ (ch << 4);
-        u16_Crc = (u16_Crc >> 8) ^ ((uint16_t)ch << 8) ^ ((uint16_t)ch << 3) ^ ((uint16_t)ch >> 4);
-    }
-    return u16_Crc;
-}
-
-// This CRC is used for ISO and AES authentication.
-// The new Desfire EV1 authentication calculates the CRC32 also over the command, but the command is not encrypted later.
-// This function allows to include the command into the calculation without the need to add the command to the same buffer that is later encrypted.
-uint32_t Utils::CalcCrc32(const byte* u8_Data1, int s32_Length1, // data to process
-                          const byte* u8_Data2, int s32_Length2) // optional additional data to process (these parameters may be omitted)
-{
-    uint32_t u32_Crc = 0xFFFFFFFF;
-    u32_Crc = CalcCrc32(u8_Data1, s32_Length1, u32_Crc);
-    u32_Crc = CalcCrc32(u8_Data2, s32_Length2, u32_Crc);
-    return u32_Crc;
-}
-
-// private
-uint32_t Utils::CalcCrc32(const byte* u8_Data, int s32_Length, uint32_t u32_Crc)
-{
-    for (int i=0; i<s32_Length; i++)
-    {
-        u32_Crc ^= u8_Data[i];
-        for (int b=0; b<8; b++)
-        {
-            bool b_Bit = (u32_Crc & 0x01) > 0;
-            u32_Crc >>= 1;
-            if (b_Bit) u32_Crc ^= 0xEDB88320;
-        }
-    }
-    return u32_Crc;
-}
-
-// -----------------------------------------------------------------------------------------------
-// These functions are only required for some boards which do not define stricmp() and strnicmp()
-// They work only for english characters, but this is completely sufficient for this project.
-// For Teensy they can be replaced with the original functions.
-int Utils::stricmp(const char* str1, const char* str2)
-{
-    return strnicmp(str1, str2, 0xFFFFFFFF);
-}
-int Utils::strnicmp(const char* str1, const char* str2, uint32_t u32_MaxCount)
-{
-    byte c1 = 0;
-    byte c2 = 0;
-    for (uint32_t i=0; i<u32_MaxCount; i++)
-    {
-        c1 = str1[i];
-        c2 = str2[i];
-        if (c1 >= 'a' && c1 <= 'z') c1 -= 32; // make upper case
-        if (c2 >= 'a' && c2 <= 'z') c2 -= 32;
-        if (c1 != c2 || c1 == 0)
-            break;
-    }
-    if (c1 < c2) return -1;
-    if (c1 > c2) return  1;
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Found ")); PN532DEBUGPRINT.print(pn532_packetbuffer[7], DEC); PN532DEBUGPRINT.println(F(" tags"));
+  #endif
+  if (pn532_packetbuffer[7] != 1)
     return 0;
+
+  uint16_t sens_res = pn532_packetbuffer[9];
+  sens_res <<= 8;
+  sens_res |= pn532_packetbuffer[10];
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("ATQA: 0x"));  PN532DEBUGPRINT.println(sens_res, HEX);
+    PN532DEBUGPRINT.print(F("SAK: 0x"));  PN532DEBUGPRINT.println(pn532_packetbuffer[11], HEX);
+  #endif
+
+  /* Card appears to be Mifare Classic */
+  *uidLength = pn532_packetbuffer[12];
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("UID:"));
+  #endif
+  for (uint8_t i=0; i < pn532_packetbuffer[12]; i++)
+  {
+    uid[i] = pn532_packetbuffer[13+i];
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.print(F(" 0x"));PN532DEBUGPRINT.print(uid[i], HEX);
+    #endif
+  }
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.println();
+  #endif
+
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    @brief  Exchanges an APDU with the currently inlisted peer
+
+    @param  send            Pointer to data to send
+    @param  sendLength      Length of the data to send
+    @param  response        Pointer to response data
+    @param  responseLength  Pointer to the response data length
+*/
+/**************************************************************************/
+bool PN532::inDataExchange(uint8_t * send, uint8_t sendLength, uint8_t * response, uint8_t * responseLength) {
+  if (sendLength > PN532_PACKBUFFSIZ-2) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("APDU length too long for packet buffer"));
+    #endif
+    return false;
+  }
+  uint8_t i;
+
+  pn532_packetbuffer[0] = 0x40; // PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = _inListedTag;
+  for (i=0; i<sendLength; ++i) {
+    pn532_packetbuffer[i+2] = send[i];
+  }
+
+  if (!sendCommandCheckAck(pn532_packetbuffer,sendLength+2,1000)) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Could not send APDU"));
+    #endif
+    return false;
+  }
+
+  if (!waitready(1000)) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Response never received for APDU..."));
+    #endif
+    return false;
+  }
+
+  readdata(pn532_packetbuffer,sizeof(pn532_packetbuffer));
+
+  if (pn532_packetbuffer[0] == 0 && pn532_packetbuffer[1] == 0 && pn532_packetbuffer[2] == 0xff) {
+    uint8_t length = pn532_packetbuffer[3];
+    if (pn532_packetbuffer[4]!=(uint8_t)(~length+1)) {
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.println(F("Length check invalid"));
+        PN532DEBUGPRINT.println(length,HEX);
+        PN532DEBUGPRINT.println((~length)+1,HEX);
+      #endif
+      return false;
+    }
+    if (pn532_packetbuffer[5]==PN532_PN532TOHOST && pn532_packetbuffer[6]==PN532_RESPONSE_INDATAEXCHANGE) {
+      if ((pn532_packetbuffer[7] & 0x3f)!=0) {
+        #ifdef PN532DEBUG
+          PN532DEBUGPRINT.println(F("Status code indicates an error"));
+        #endif
+        return false;
+      }
+
+      length -= 3;
+
+      if (length > *responseLength) {
+        length = *responseLength; // silent truncation...
+      }
+
+      for (i=0; i<length; ++i) {
+        response[i] = pn532_packetbuffer[8+i];
+      }
+      *responseLength = length;
+
+      return true;
+    }
+    else {
+      PN532DEBUGPRINT.print(F("Don't know how to handle this command: "));
+      PN532DEBUGPRINT.println(pn532_packetbuffer[6],HEX);
+      return false;
+    }
+  }
+  else {
+    PN532DEBUGPRINT.println(F("Preamble missing"));
+    return false;
+  }
+}
+
+/**************************************************************************/
+/*!
+    @brief  'InLists' a passive target. PN532 acting as reader/initiator,
+            peer acting as card/responder.
+*/
+/**************************************************************************/
+bool PN532::inListPassiveTarget() {
+  pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
+  pn532_packetbuffer[1] = 1;
+  pn532_packetbuffer[2] = 0;
+
+  #ifdef PN532DEBUG
+    PN532DEBUGPRINT.print(F("About to inList passive target"));
+  #endif
+
+  if (!sendCommandCheckAck(pn532_packetbuffer,3,1000)) {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Could not send inlist message"));
+    #endif
+    return false;
+  }
+
+  if (!waitready(30000)) {
+    return false;
+  }
+
+  readdata(pn532_packetbuffer,sizeof(pn532_packetbuffer));
+
+  if (pn532_packetbuffer[0] == 0 && pn532_packetbuffer[1] == 0 && pn532_packetbuffer[2] == 0xff) {
+    uint8_t length = pn532_packetbuffer[3];
+    if (pn532_packetbuffer[4]!=(uint8_t)(~length+1)) {
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.println(F("Length check invalid"));
+        PN532DEBUGPRINT.println(length,HEX);
+        PN532DEBUGPRINT.println((~length)+1,HEX);
+      #endif
+      return false;
+    }
+    if (pn532_packetbuffer[5]==PN532_PN532TOHOST && pn532_packetbuffer[6]==PN532_RESPONSE_INLISTPASSIVETARGET) {
+      if (pn532_packetbuffer[7] != 1) {
+        #ifdef PN532DEBUG
+        PN532DEBUGPRINT.println(F("Unhandled number of targets inlisted"));
+        #endif
+        PN532DEBUGPRINT.println(F("Number of tags inlisted:"));
+        PN532DEBUGPRINT.println(pn532_packetbuffer[7]);
+        return false;
+      }
+
+      _inListedTag = pn532_packetbuffer[8];
+      PN532DEBUGPRINT.print(F("Tag number: "));
+      PN532DEBUGPRINT.println(_inListedTag);
+
+      return true;
+    } else {
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.print(F("Unexpected response to inlist passive host"));
+      #endif
+      return false;
+    }
+  }
+  else {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println(F("Preamble missing"));
+    #endif
+    return false;
+  }
+
+  return true;
+}
+
+
+/***** Mifare Classic Functions ******/
+
+/**************************************************************************/
+/*!
+      Indicates whether the specified block number is the first block
+      in the sector (block 0 relative to the current sector)
+*/
+/**************************************************************************/
+bool PN532::mifareclassic_IsFirstBlock (uint32_t uiBlock)
+{
+  // Test if we are in the small or big sectors
+  if (uiBlock < 128)
+    return ((uiBlock) % 4 == 0);
+  else
+    return ((uiBlock) % 16 == 0);
+}
+
+/**************************************************************************/
+/*!
+      Indicates whether the specified block number is the sector trailer
+*/
+/**************************************************************************/
+bool PN532::mifareclassic_IsTrailerBlock (uint32_t uiBlock)
+{
+  // Test if we are in the small or big sectors
+  if (uiBlock < 128)
+    return ((uiBlock + 1) % 4 == 0);
+  else
+    return ((uiBlock + 1) % 16 == 0);
+}
+
+/**************************************************************************/
+/*!
+    Tries to authenticate a block of memory on a MIFARE card using the
+    INDATAEXCHANGE command.  See section 7.3.8 of the PN532 User Manual
+    for more information on sending MIFARE and other commands.
+
+    @param  uid           Pointer to a byte array containing the card UID
+    @param  uidLen        The length (in bytes) of the card's UID (Should
+                          be 4 for MIFARE Classic)
+    @param  blockNumber   The block number to authenticate.  (0..63 for
+                          1KB cards, and 0..255 for 4KB cards).
+    @param  keyNumber     Which key type to use during authentication
+                          (0 = MIFARE_CMD_AUTH_A, 1 = MIFARE_CMD_AUTH_B)
+    @param  keyData       Pointer to a byte array containing the 6 byte
+                          key value
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareclassic_AuthenticateBlock (uint8_t * uid, uint8_t uidLen, uint32_t blockNumber, uint8_t keyNumber, uint8_t * keyData)
+{
+  uint8_t len;
+  uint8_t i;
+
+  // Hang on to the key and uid data
+  memcpy (_key, keyData, 6);
+  memcpy (_uid, uid, uidLen);
+  _uidLen = uidLen;
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Trying to authenticate card "));
+    PN532::PrintHex(_uid, _uidLen);
+    PN532DEBUGPRINT.print(F("Using authentication KEY "));PN532DEBUGPRINT.print(keyNumber ? 'B' : 'A');PN532DEBUGPRINT.print(F(": "));
+    PN532::PrintHex(_key, 6);
+  #endif
+
+  // Prepare the authentication command //
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;   /* Data Exchange Header */
+  pn532_packetbuffer[1] = 1;                              /* Max card numbers */
+  pn532_packetbuffer[2] = (keyNumber) ? MIFARE_CMD_AUTH_B : MIFARE_CMD_AUTH_A;
+  pn532_packetbuffer[3] = blockNumber;                    /* Block Number (1K = 0..63, 4K = 0..255 */
+  memcpy (pn532_packetbuffer+4, _key, 6);
+  for (i = 0; i < _uidLen; i++)
+  {
+    pn532_packetbuffer[10+i] = _uid[i];                /* 4 byte card ID */
+  }
+
+  if (! sendCommandCheckAck(pn532_packetbuffer, 10+_uidLen))
+    return 0;
+
+  // Read the response packet
+  readdata(pn532_packetbuffer, 12);
+
+  // check if the response is valid and we are authenticated???
+  // for an auth success it should be bytes 5-7: 0xD5 0x41 0x00
+  // Mifare auth error is technically byte 7: 0x14 but anything other and 0x00 is not good
+  if (pn532_packetbuffer[7] != 0x00)
+  {
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F("Authentification failed: "));
+      PN532::PrintHexChar(pn532_packetbuffer, 12);
+    #endif
+    return 0;
+  }
+
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Tries to read an entire 16-byte data block at the specified block
+    address.
+
+    @param  blockNumber   The block number to authenticate.  (0..63 for
+                          1KB cards, and 0..255 for 4KB cards).
+    @param  data          Pointer to the byte array that will hold the
+                          retrieved data (if any)
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareclassic_ReadDataBlock (uint8_t blockNumber, uint8_t * data)
+{
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Trying to read 16 bytes from block "));PN532DEBUGPRINT.println(blockNumber);
+  #endif
+
+  /* Prepare the command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                      /* Card number */
+  pn532_packetbuffer[2] = MIFARE_CMD_READ;        /* Mifare Read command = 0x30 */
+  pn532_packetbuffer[3] = blockNumber;            /* Block Number (0..63 for 1K, 0..255 for 4K) */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 4))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for read command"));
+    #endif
+    return 0;
+  }
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+
+  /* If byte 8 isn't 0x00 we probably have an error */
+  if (pn532_packetbuffer[7] != 0x00)
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Unexpected response"));
+      PN532::PrintHexChar(pn532_packetbuffer, 26);
+    #endif
+    return 0;
+  }
+
+  /* Copy the 16 data bytes to the output buffer        */
+  /* Block content starts at byte 9 of a valid response */
+  memcpy (data, pn532_packetbuffer+8, 16);
+
+  /* Display data for debug if requested */
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Block "));
+    PN532DEBUGPRINT.println(blockNumber);
+    PN532::PrintHexChar(data, 16);
+  #endif
+
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Tries to write an entire 16-byte data block at the specified block
+    address.
+
+    @param  blockNumber   The block number to authenticate.  (0..63 for
+                          1KB cards, and 0..255 for 4KB cards).
+    @param  data          The byte array that contains the data to write.
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareclassic_WriteDataBlock (uint8_t blockNumber, uint8_t * data)
+{
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Trying to write 16 bytes to block "));PN532DEBUGPRINT.println(blockNumber);
+  #endif
+
+  /* Prepare the first command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                      /* Card number */
+  pn532_packetbuffer[2] = MIFARE_CMD_WRITE;       /* Mifare Write command = 0xA0 */
+  pn532_packetbuffer[3] = blockNumber;            /* Block Number (0..63 for 1K, 0..255 for 4K) */
+  memcpy (pn532_packetbuffer+4, data, 16);          /* Data Payload */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 20))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for write command"));
+    #endif
+    return 0;
+  }
+  delay(10);
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Formats a Mifare Classic card to store NDEF Records
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareclassic_FormatNDEF (void)
+{
+  uint8_t sectorbuffer1[16] = {0x14, 0x01, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1};
+  uint8_t sectorbuffer2[16] = {0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1};
+  uint8_t sectorbuffer3[16] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x78, 0x77, 0x88, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+  // Note 0xA0 0xA1 0xA2 0xA3 0xA4 0xA5 must be used for key A
+  // for the MAD sector in NDEF records (sector 0)
+
+  // Write block 1 and 2 to the card
+  if (!(mifareclassic_WriteDataBlock (1, sectorbuffer1)))
+    return 0;
+  if (!(mifareclassic_WriteDataBlock (2, sectorbuffer2)))
+    return 0;
+  // Write key A and access rights card
+  if (!(mifareclassic_WriteDataBlock (3, sectorbuffer3)))
+    return 0;
+
+  // Seems that everything was OK (?!)
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Writes an NDEF URI Record to the specified sector (1..15)
+
+    Note that this function assumes that the Mifare Classic card is
+    already formatted to work as an "NFC Forum Tag" and uses a MAD1
+    file system.  You can use the NXP TagWriter app on Android to
+    properly format cards for this.
+
+    @param  sectorNumber  The sector that the URI record should be written
+                          to (can be 1..15 for a 1K card)
+    @param  uriIdentifier The uri identifier code (0 = none, 0x01 =
+                          "http://www.", etc.)
+    @param  url           The uri text to write (max 38 characters).
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareclassic_WriteNDEFURI (uint8_t sectorNumber, uint8_t uriIdentifier, const char * url)
+{
+  // Figure out how long the string is
+  uint8_t len = strlen(url);
+
+  // Make sure we're within a 1K limit for the sector number
+  if ((sectorNumber < 1) || (sectorNumber > 15))
+    return 0;
+
+  // Make sure the URI payload is between 1 and 38 chars
+  if ((len < 1) || (len > 38))
+    return 0;
+
+  // Note 0xD3 0xF7 0xD3 0xF7 0xD3 0xF7 must be used for key A
+  // in NDEF records
+
+  // Setup the sector buffer (w/pre-formatted TLV wrapper and NDEF message)
+  uint8_t sectorbuffer1[16] = {0x00, 0x00, 0x03, len+5, 0xD1, 0x01, len+1, 0x55, uriIdentifier, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  uint8_t sectorbuffer2[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  uint8_t sectorbuffer3[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  uint8_t sectorbuffer4[16] = {0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7, 0x7F, 0x07, 0x88, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  if (len <= 6)
+  {
+    // Unlikely we'll get a url this short, but why not ...
+    memcpy (sectorbuffer1+9, url, len);
+    sectorbuffer1[len+9] = 0xFE;
+  }
+  else if (len == 7)
+  {
+    // 0xFE needs to be wrapped around to next block
+    memcpy (sectorbuffer1+9, url, len);
+    sectorbuffer2[0] = 0xFE;
+  }
+  else if ((len > 7) && (len <= 22))
+  {
+    // Url fits in two blocks
+    memcpy (sectorbuffer1+9, url, 7);
+    memcpy (sectorbuffer2, url+7, len-7);
+    sectorbuffer2[len-7] = 0xFE;
+  }
+  else if (len == 23)
+  {
+    // 0xFE needs to be wrapped around to final block
+    memcpy (sectorbuffer1+9, url, 7);
+    memcpy (sectorbuffer2, url+7, len-7);
+    sectorbuffer3[0] = 0xFE;
+  }
+  else
+  {
+    // Url fits in three blocks
+    memcpy (sectorbuffer1+9, url, 7);
+    memcpy (sectorbuffer2, url+7, 16);
+    memcpy (sectorbuffer3, url+23, len-24);
+    sectorbuffer3[len-22] = 0xFE;
+  }
+
+  // Now write all three blocks back to the card
+  if (!(mifareclassic_WriteDataBlock (sectorNumber*4, sectorbuffer1)))
+    return 0;
+  if (!(mifareclassic_WriteDataBlock ((sectorNumber*4)+1, sectorbuffer2)))
+    return 0;
+  if (!(mifareclassic_WriteDataBlock ((sectorNumber*4)+2, sectorbuffer3)))
+    return 0;
+  if (!(mifareclassic_WriteDataBlock ((sectorNumber*4)+3, sectorbuffer4)))
+    return 0;
+
+  // Seems that everything was OK (?!)
+  return 1;
+}
+
+/***** Mifare Ultralight Functions ******/
+
+/**************************************************************************/
+/*!
+    Tries to read an entire 4-byte page at the specified address.
+
+    @param  page        The page number (0..63 in most cases)
+    @param  buffer      Pointer to the byte array that will hold the
+                        retrieved data (if any)
+*/
+/**************************************************************************/
+uint8_t PN532::mifareultralight_ReadPage (uint8_t page, uint8_t * buffer)
+{
+  if (page >= 64)
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Page value out of range"));
+    #endif
+    return 0;
+  }
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Reading page "));PN532DEBUGPRINT.println(page);
+  #endif
+
+  /* Prepare the command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                   /* Card number */
+  pn532_packetbuffer[2] = MIFARE_CMD_READ;     /* Mifare Read command = 0x30 */
+  pn532_packetbuffer[3] = page;                /* Page Number (0..63 in most cases) */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 4))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for write command"));
+    #endif
+    return 0;
+  }
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.println(F("Received: "));
+    PN532::PrintHexChar(pn532_packetbuffer, 26);
+  #endif
+
+  /* If byte 8 isn't 0x00 we probably have an error */
+  if (pn532_packetbuffer[7] == 0x00)
+  {
+    /* Copy the 4 data bytes to the output buffer         */
+    /* Block content starts at byte 9 of a valid response */
+    /* Note that the command actually reads 16 byte or 4  */
+    /* pages at a time ... we simply discard the last 12  */
+    /* bytes                                              */
+    memcpy (buffer, pn532_packetbuffer+8, 4);
+  }
+  else
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Unexpected response reading block: "));
+      PN532::PrintHexChar(pn532_packetbuffer, 26);
+    #endif
+    return 0;
+  }
+
+  /* Display data for debug if requested */
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Page "));PN532DEBUGPRINT.print(page);PN532DEBUGPRINT.println(F(":"));
+    PN532::PrintHexChar(buffer, 4);
+  #endif
+
+  // Return OK signal
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Tries to write an entire 4-byte page at the specified block
+    address.
+
+    @param  page          The page number to write.  (0..63 for most cases)
+    @param  data          The byte array that contains the data to write.
+                          Should be exactly 4 bytes long.
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::mifareultralight_WritePage (uint8_t page, uint8_t * data)
+{
+
+  if (page >= 64)
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Page value out of range"));
+    #endif
+    // Return Failed Signal
+    return 0;
+  }
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Trying to write 4 byte page"));PN532DEBUGPRINT.println(page);
+  #endif
+
+  /* Prepare the first command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                      /* Card number */
+  pn532_packetbuffer[2] = MIFARE_ULTRALIGHT_CMD_WRITE;       /* Mifare Ultralight Write command = 0xA2 */
+  pn532_packetbuffer[3] = page;            /* Page Number (0..63 for most cases) */
+  memcpy (pn532_packetbuffer+4, data, 4);          /* Data Payload */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 8))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for write command"));
+    #endif
+
+    // Return Failed Signal
+    return 0;
+  }
+  delay(10);
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+
+  // Return OK Signal
+  return 1;
+}
+
+
+/***** NTAG2xx Functions ******/
+
+/**************************************************************************/
+/*!
+    Tries to read an entire 4-byte page at the specified address.
+
+    @param  page        The page number (0..63 in most cases)
+    @param  buffer      Pointer to the byte array that will hold the
+                        retrieved data (if any)
+*/
+/**************************************************************************/
+uint8_t PN532::ntag2xx_ReadPage (uint8_t page, uint8_t * buffer)
+{
+  // TAG Type       PAGES   USER START    USER STOP
+  // --------       -----   ----------    ---------
+  // NTAG 203       42      4             39
+  // NTAG 213       45      4             39
+  // NTAG 215       135     4             129
+  // NTAG 216       231     4             225
+
+  if (page >= 231)
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Page value out of range"));
+    #endif
+    return 0;
+  }
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Reading page "));PN532DEBUGPRINT.println(page);
+  #endif
+
+  /* Prepare the command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                   /* Card number */
+  pn532_packetbuffer[2] = MIFARE_CMD_READ;     /* Mifare Read command = 0x30 */
+  pn532_packetbuffer[3] = page;                /* Page Number (0..63 in most cases) */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 4))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for write command"));
+    #endif
+    return 0;
+  }
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.println(F("Received: "));
+    PN532::PrintHexChar(pn532_packetbuffer, 26);
+  #endif
+
+  /* If byte 8 isn't 0x00 we probably have an error */
+  if (pn532_packetbuffer[7] == 0x00)
+  {
+    /* Copy the 4 data bytes to the output buffer         */
+    /* Block content starts at byte 9 of a valid response */
+    /* Note that the command actually reads 16 byte or 4  */
+    /* pages at a time ... we simply discard the last 12  */
+    /* bytes                                              */
+    memcpy (buffer, pn532_packetbuffer+8, 4);
+  }
+  else
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Unexpected response reading block: "));
+      PN532::PrintHexChar(pn532_packetbuffer, 26);
+    #endif
+    return 0;
+  }
+
+  /* Display data for debug if requested */
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Page "));PN532DEBUGPRINT.print(page);PN532DEBUGPRINT.println(F(":"));
+    PN532::PrintHexChar(buffer, 4);
+  #endif
+
+  // Return OK signal
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Tries to write an entire 4-byte page at the specified block
+    address.
+
+    @param  page          The page number to write.  (0..63 for most cases)
+    @param  data          The byte array that contains the data to write.
+                          Should be exactly 4 bytes long.
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::ntag2xx_WritePage (uint8_t page, uint8_t * data)
+{
+  // TAG Type       PAGES   USER START    USER STOP
+  // --------       -----   ----------    ---------
+  // NTAG 203       42      4             39
+  // NTAG 213       45      4             39
+  // NTAG 215       135     4             129
+  // NTAG 216       231     4             225
+
+  if ((page < 4) || (page > 225))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Page value out of range"));
+    #endif
+    // Return Failed Signal
+    return 0;
+  }
+
+  #ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.print(F("Trying to write 4 byte page"));PN532DEBUGPRINT.println(page);
+  #endif
+
+  /* Prepare the first command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+  pn532_packetbuffer[1] = 1;                              /* Card number */
+  pn532_packetbuffer[2] = MIFARE_ULTRALIGHT_CMD_WRITE;    /* Mifare Ultralight Write command = 0xA2 */
+  pn532_packetbuffer[3] = page;                           /* Page Number (0..63 for most cases) */
+  memcpy (pn532_packetbuffer+4, data, 4);                 /* Data Payload */
+
+  /* Send the command */
+  if (! sendCommandCheckAck(pn532_packetbuffer, 8))
+  {
+    #ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(F("Failed to receive ACK for write command"));
+    #endif
+
+    // Return Failed Signal
+    return 0;
+  }
+  delay(10);
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 26);
+
+  // Return OK Signal
+  return 1;
+}
+
+/**************************************************************************/
+/*!
+    Writes an NDEF URI Record starting at the specified page (4..nn)
+
+    Note that this function assumes that the NTAG2xx card is
+    already formatted to work as an "NFC Forum Tag".
+
+    @param  uriIdentifier The uri identifier code (0 = none, 0x01 =
+                          "http://www.", etc.)
+    @param  url           The uri text to write (null-terminated string).
+    @param  dataLen       The size of the data area for overflow checks.
+
+    @returns 1 if everything executed properly, 0 for an error
+*/
+/**************************************************************************/
+uint8_t PN532::ntag2xx_WriteNDEFURI (uint8_t uriIdentifier, char * url, uint8_t dataLen)
+{
+  uint8_t pageBuffer[4] = { 0, 0, 0, 0 };
+
+  // Remove NDEF record overhead from the URI data (pageHeader below)
+  uint8_t wrapperSize = 12;
+
+  // Figure out how long the string is
+  uint8_t len = strlen(url);
+
+  // Make sure the URI payload will fit in dataLen (include 0xFE trailer)
+  if ((len < 1) || (len+1 > (dataLen-wrapperSize)))
+    return 0;
+
+  // Setup the record header
+  // See NFCForum-TS-Type-2-Tag_1.1.pdf for details
+  uint8_t pageHeader[12] =
+  {
+    /* NDEF Lock Control TLV (must be first and always present) */
+    0x01,         /* Tag Field (0x01 = Lock Control TLV) */
+    0x03,         /* Payload Length (always 3) */
+    0xA0,         /* The position inside the tag of the lock bytes (upper 4 = page address, lower 4 = byte offset) */
+    0x10,         /* Size in bits of the lock area */
+    0x44,         /* Size in bytes of a page and the number of bytes each lock bit can lock (4 bit + 4 bits) */
+    /* NDEF Message TLV - URI Record */
+    0x03,         /* Tag Field (0x03 = NDEF Message) */
+    len+5,        /* Payload Length (not including 0xFE trailer) */
+    0xD1,         /* NDEF Record Header (TNF=0x1:Well known record + SR + ME + MB) */
+    0x01,         /* Type Length for the record type indicator */
+    len+1,        /* Payload len */
+    0x55,         /* Record Type Indicator (0x55 or 'U' = URI Record) */
+    uriIdentifier /* URI Prefix (ex. 0x01 = "http://www.") */
+  };
+
+  // Write 12 byte header (three pages of data starting at page 4)
+  memcpy (pageBuffer, pageHeader, 4);
+  if (!(ntag2xx_WritePage (4, pageBuffer)))
+    return 0;
+  memcpy (pageBuffer, pageHeader+4, 4);
+  if (!(ntag2xx_WritePage (5, pageBuffer)))
+    return 0;
+  memcpy (pageBuffer, pageHeader+8, 4);
+  if (!(ntag2xx_WritePage (6, pageBuffer)))
+    return 0;
+
+  // Write URI (starting at page 7)
+  uint8_t currentPage = 7;
+  char * urlcopy = url;
+  while(len)
+  {
+    if (len < 4)
+    {
+      memset(pageBuffer, 0, 4);
+      memcpy(pageBuffer, urlcopy, len);
+      pageBuffer[len] = 0xFE; // NDEF record footer
+      if (!(ntag2xx_WritePage (currentPage, pageBuffer)))
+        return 0;
+      // DONE!
+      return 1;
+    }
+    else if (len == 4)
+    {
+      memcpy(pageBuffer, urlcopy, len);
+      if (!(ntag2xx_WritePage (currentPage, pageBuffer)))
+        return 0;
+      memset(pageBuffer, 0, 4);
+      pageBuffer[0] = 0xFE; // NDEF record footer
+      currentPage++;
+      if (!(ntag2xx_WritePage (currentPage, pageBuffer)))
+        return 0;
+      // DONE!
+      return 1;
+    }
+    else
+    {
+      // More than one page of data left
+      memcpy(pageBuffer, urlcopy, 4);
+      if (!(ntag2xx_WritePage (currentPage, pageBuffer)))
+        return 0;
+      currentPage++;
+      urlcopy+=4;
+      len-=4;
+    }
+  }
+
+  // Seems that everything was OK (?!)
+  return 1;
+}
+
+
+/************** high level communication functions (handles both I2C and SPI) */
+
+
+/**************************************************************************/
+/*!
+    @brief  Tries to read the SPI or I2C ACK signal
+*/
+/**************************************************************************/
+bool PN532::readack() {
+  uint8_t ackbuff[6];
+
+  readdata(ackbuff, 6);
+
+  return (0 == strncmp((char *)ackbuff, (char *)pn532ack, 6));
+}
+
+
+/**************************************************************************/
+/*!
+    @brief  Return true if the PN532 is ready with a response.
+*/
+/**************************************************************************/
+bool PN532::isready() {
+  if (_usingSPI) {
+    // SPI read status and check if ready.
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.beginTransaction(PN532_SPI_SETTING);
+    #endif
+    digitalWrite(_ss, LOW);
+    delay(2);
+    spi_write(PN532_SPI_STATREAD);
+    // read byte
+    uint8_t x = spi_read();
+
+    digitalWrite(_ss, HIGH);
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.endTransaction();
+    #endif
+
+    // Check if status is ready.
+    return x == PN532_SPI_READY;
+  }
+  else {
+    // I2C check if status is ready by IRQ line being pulled low.
+    uint8_t x = digitalRead(_irq);
+    return x == 0;
+  }
+}
+
+/**************************************************************************/
+/*!
+    @brief  Waits until the PN532 is ready.
+
+    @param  timeout   Timeout before giving up
+*/
+/**************************************************************************/
+bool PN532::waitready(uint16_t timeout) {
+  uint16_t timer = 0;
+  while(!isready()) {
+    if (timeout != 0) {
+      timer += 10;
+      if (timer > timeout) {
+        PN532DEBUGPRINT.println("TIMEOUT!");
+        return false;
+      }
+    }
+    delay(10);
+  }
+  return true;
+}
+
+/**************************************************************************/
+/*!
+    @brief  Reads n bytes of data from the PN532 via SPI or I2C.
+
+    @param  buff      Pointer to the buffer where data will be written
+    @param  n         Number of bytes to be read
+*/
+/**************************************************************************/
+void PN532::readdata(uint8_t* buff, uint8_t n) {
+  if (_usingSPI) {
+    // SPI write.
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.beginTransaction(PN532_SPI_SETTING);
+    #endif
+    digitalWrite(_ss, LOW);
+    delay(2);
+    spi_write(PN532_SPI_DATAREAD);
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F("Reading: "));
+    #endif
+    for (uint8_t i=0; i<n; i++) {
+      delay(1);
+      buff[i] = spi_read();
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.print(F(" 0x"));
+        PN532DEBUGPRINT.print(buff[i], HEX);
+      #endif
+    }
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println();
+    #endif
+
+    digitalWrite(_ss, HIGH);
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.endTransaction();
+    #endif
+  }
+  else {
+    // I2C write.
+    uint16_t timer = 0;
+
+    delay(2);
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F("Reading: "));
+    #endif
+    // Start read (n+1 to take into account leading 0x01 with I2C)
+    WIRE.requestFrom((uint8_t)PN532_I2C_ADDRESS, (uint8_t)(n+2));
+    // Discard the leading 0x01
+    i2c_recv();
+    for (uint8_t i=0; i<n; i++) {
+      delay(1);
+      buff[i] = i2c_recv();
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.print(F(" 0x"));
+        PN532DEBUGPRINT.print(buff[i], HEX);
+      #endif
+    }
+    // Discard trailing 0x00 0x00
+    // i2c_recv();
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.println();
+    #endif
+  }
+}
+
+/**************************************************************************/
+/*!
+    @brief  set the PN532 as iso14443a Target behaving as a SmartCard
+    @param  None
+    #author Salvador Mendoza(salmg.net) new functions:
+    -AsTarget
+    -getDataTarget
+    -setDataTarget
+*/
+/**************************************************************************/
+uint8_t PN532::AsTarget() {
+   pn532_packetbuffer[0] = 0x8C;
+    uint8_t target[] = {
+    0x8C, // INIT AS TARGET
+    0x00, // MODE -> BITFIELD
+    0x08, 0x00, //SENS_RES - MIFARE PARAMS
+    0xdc, 0x44, 0x20, //NFCID1T
+    0x60, //SEL_RES
+    0x01,0xfe, //NFCID2T MUST START WITH 01fe - FELICA PARAMS - POL_RES
+    0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,
+    0xc0,0xc1,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,//PAD
+    0xff,0xff, //SYSTEM CODE
+    0xaa,0x99,0x88,0x77,0x66,0x55,0x44,0x33,0x22,0x11,0x01,0x00, //NFCID3t MAX 47 BYTES ATR_RES
+    0x0d,0x52,0x46,0x49,0x44,0x49,0x4f,0x74,0x20,0x50,0x4e,0x35,0x33,0x32 //HISTORICAL BYTES
+  };
+  if (!sendCommandCheckAck(target, sizeof(target)))
+    return false;
+
+  // read data packet
+  readdata(pn532_packetbuffer, 8);
+
+  int offset = _usingSPI ? 5 : 6;
+  return  (pn532_packetbuffer[offset] == 0x15);
+}
+/**************************************************************************/
+/*!
+    @brief  retrieve response from the emulation mode
+
+    @param  cmd    = data
+    @param  cmdlen = data length
+*/
+/**************************************************************************/
+uint8_t PN532::getDataTarget(uint8_t* cmd, uint8_t *cmdlen) {
+  uint8_t length;
+  pn532_packetbuffer[0] = 0x86;
+  if (!sendCommandCheckAck(pn532_packetbuffer, 1, 1000)){
+    PN532DEBUGPRINT.println(F("Error en ack"));
+    return false;
+  }
+
+  // read data packet
+  readdata(pn532_packetbuffer, 64);
+  length = pn532_packetbuffer[3]-3;
+
+  //if (length > *responseLength) {// Bug, should avoid it in the reading target data
+  //  length = *responseLength; // silent truncation...
+  //}
+
+  for (int i=0; i<length; ++i) {
+      cmd[i] = pn532_packetbuffer[8+i];
+  }
+  *cmdlen = length;
+  return true;
+}
+
+/**************************************************************************/
+/*!
+    @brief  set data in PN532 in the emulation mode
+
+    @param  cmd    = data
+    @param  cmdlen = data length
+*/
+/**************************************************************************/
+uint8_t PN532::setDataTarget(uint8_t* cmd, uint8_t cmdlen) {
+  uint8_t length;
+  //cmd1[0] = 0x8E; Must!
+
+  if (!sendCommandCheckAck(cmd, cmdlen))
+    return false;
+
+  // read data packet
+  readdata(pn532_packetbuffer, 8);
+  length = pn532_packetbuffer[3]-3;
+  for (int i=0; i<length; ++i) {
+    cmd[i] = pn532_packetbuffer[8+i];
+  }
+  //cmdl = 0
+  cmdlen = length;
+
+  int offset = _usingSPI ? 5 : 6;
+  return  (pn532_packetbuffer[offset] == 0x15);
+}
+
+/**************************************************************************/
+/*!
+    @brief  Writes a command to the PN532, automatically inserting the
+            preamble and required frame details (checksum, len, etc.)
+
+    @param  cmd       Pointer to the command buffer
+    @param  cmdlen    Command length in bytes
+*/
+/**************************************************************************/
+void PN532::writecommand(uint8_t* cmd, uint8_t cmdlen) {
+  if (_usingSPI) {
+    // SPI command write.
+    uint8_t checksum;
+
+    cmdlen++;
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F("\nSending: "));
+    #endif
+
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.beginTransaction(PN532_SPI_SETTING);
+    #endif
+    digitalWrite(_ss, LOW);
+    delay(2);     // or whatever the delay is for waking up the board
+    spi_write(PN532_SPI_DATAWRITE);
+
+    checksum = PN532_PREAMBLE + PN532_PREAMBLE + PN532_STARTCODE2;
+    spi_write(PN532_PREAMBLE);
+    spi_write(PN532_PREAMBLE);
+    spi_write(PN532_STARTCODE2);
+
+    spi_write(cmdlen);
+    spi_write(~cmdlen + 1);
+
+    spi_write(PN532_HOSTTOPN532);
+    checksum += PN532_HOSTTOPN532;
+
+    #ifdef PN532DEBUG
+    PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_PREAMBLE, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_PREAMBLE, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_STARTCODE2, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)cmdlen, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)(~cmdlen + 1), HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_HOSTTOPN532, HEX);
+    #endif
+
+    for (uint8_t i=0; i<cmdlen-1; i++) {
+      spi_write(cmd[i]);
+      checksum += cmd[i];
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)cmd[i], HEX);
+      #endif
+    }
+
+    spi_write(~checksum);
+    spi_write(PN532_POSTAMBLE);
+    digitalWrite(_ss, HIGH);
+    #ifdef SPI_HAS_TRANSACTION
+      if (_hardwareSPI) SPI.endTransaction();
+    #endif
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)~checksum, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_POSTAMBLE, HEX);
+      PN532DEBUGPRINT.println();
+    #endif
+  }
+  else {
+    // I2C command write.
+    uint8_t checksum;
+
+    cmdlen++;
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F("\nSending: "));
+    #endif
+
+    delay(2);     // or whatever the delay is for waking up the board
+
+    // I2C START
+    WIRE.beginTransmission(PN532_I2C_ADDRESS);
+    checksum = PN532_PREAMBLE + PN532_PREAMBLE + PN532_STARTCODE2;
+    i2c_send(PN532_PREAMBLE);
+    i2c_send(PN532_PREAMBLE);
+    i2c_send(PN532_STARTCODE2);
+
+    i2c_send(cmdlen);
+    i2c_send(~cmdlen + 1);
+
+    i2c_send(PN532_HOSTTOPN532);
+    checksum += PN532_HOSTTOPN532;
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_PREAMBLE, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_PREAMBLE, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_STARTCODE2, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)cmdlen, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)(~cmdlen + 1), HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_HOSTTOPN532, HEX);
+    #endif
+
+    for (uint8_t i=0; i<cmdlen-1; i++) {
+      i2c_send(cmd[i]);
+      checksum += cmd[i];
+      #ifdef PN532DEBUG
+        PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)cmd[i], HEX);
+      #endif
+    }
+
+    i2c_send((byte)~checksum);
+    i2c_send((byte)PN532_POSTAMBLE);
+
+    // I2C STOP
+    WIRE.endTransmission();
+
+    #ifdef PN532DEBUG
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)~checksum, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print((byte)PN532_POSTAMBLE, HEX);
+      PN532DEBUGPRINT.println();
+    #endif
+
+  }
+}
+/************** low level SPI */
+
+/**************************************************************************/
+/*!
+    @brief  Low-level SPI write wrapper
+
+    @param  c       8-bit command to write to the SPI bus
+*/
+/**************************************************************************/
+void PN532::spi_write(uint8_t c) {
+  if (_hardwareSPI) {
+    // Hardware SPI write.
+    SPI.transfer(c);
+  }
+  else {
+    // Software SPI write.
+    int8_t i;
+    digitalWrite(_clk, HIGH);
+
+    for (i=0; i<8; i++) {
+      digitalWrite(_clk, LOW);
+      if (c & _BV(i)) {
+        digitalWrite(_mosi, HIGH);
+      } else {
+        digitalWrite(_mosi, LOW);
+      }
+      digitalWrite(_clk, HIGH);
+    }
+  }
+}
+
+/**************************************************************************/
+/*!
+    @brief  Low-level SPI read wrapper
+
+    @returns The 8-bit value that was read from the SPI bus
+*/
+/**************************************************************************/
+uint8_t PN532::spi_read(void) {
+  int8_t i, x;
+  x = 0;
+
+  if (_hardwareSPI) {
+    // Hardware SPI read.
+    x = SPI.transfer(0x00);
+  }
+  else {
+    // Software SPI read.
+    digitalWrite(_clk, HIGH);
+
+    for (i=0; i<8; i++) {
+      if (digitalRead(_miso)) {
+        x |= _BV(i);
+      }
+      digitalWrite(_clk, LOW);
+      digitalWrite(_clk, HIGH);
+    }
+  }
+
+  return x;
 }
