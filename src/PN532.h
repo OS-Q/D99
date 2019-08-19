@@ -124,11 +124,11 @@
 #define PN532_GPIO_P34                      (4)
 #define PN532_GPIO_P35                      (5)
 
-class Adafruit_PN532{
+class PN532{
  public:
-  Adafruit_PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss);  // Software SPI
-  Adafruit_PN532(uint8_t irq, uint8_t reset);  // Hardware I2C
-  Adafruit_PN532(uint8_t ss);  // Hardware SPI
+  PN532(uint8_t clk, uint8_t miso, uint8_t mosi, uint8_t ss);  // Software SPI
+  PN532(uint8_t irq, uint8_t reset);  // Hardware I2C
+  PN532(uint8_t ss);  // Hardware SPI
   void begin(void);
   
   // Generic PN532 functions
