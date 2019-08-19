@@ -11,7 +11,7 @@
  */
 #include <Wire.h>
 #include <SPI.h>
-#include <Adafruit_PN532.h>
+#include <PN532.h>
 
 #define PN532_SCK  (14)
 #define PN532_MOSI (13)
@@ -20,13 +20,13 @@
 #define PN532_IRQ   (4)
 #define PN532_RESET (3)  
 
-//Adafruit_PN532 nfc(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_SS);
+//PN532 nfc(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_SS);
 
 // Use this line for a breakout with a hardware SPI connection. 
-Adafruit_PN532 nfc(PN532_SS);
+PN532 nfc(PN532_SS);
 
 // Or use this line for a breakout or shield with an I2C connection:
-//Adafruit_PN532 nfc(PN532_IRQ, PN532_RESET);
+//PN532 nfc(PN532_IRQ, PN532_RESET);
 
 
 void setup(void) {
