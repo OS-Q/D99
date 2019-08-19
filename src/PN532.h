@@ -1,4 +1,3 @@
-
 #ifndef PN532_H
 #define PN532_H
 
@@ -6,15 +5,6 @@
 
 #define TRUE   true
 #define FALSE  false
-
-
-// *********************************************************************************
-// The following switches define how the Teensy communicates with the PN532 board.
-// For the DoorOpener sketch the only valid option is Software SPI.
-// For other projects with the PN532 you may change this.
-// ATTENTION: Only one of the following defines must be set to true!
-// NOTE: In Software SPI mode there is no external libraray required. Only 4 regular digital pins are used.
-// If you want to transfer the code to another processor the easiest way will be to use Software SPI mode.
 
 #define USE_SOFTWARE_SPI   TRUE   // Visual Studio needs this in upper case
 #define USE_HARDWARE_SPI   FALSE  // Visual Studio needs this in upper case
@@ -41,10 +31,7 @@
     #define LOW      0x0
 #endif
 
-// -------------------------------------------------------------------------------------------------------------------
 
-// USB connection to Terminal program (Teraterm) on PC via COM port
-// You can leave all functions empty and only redirect Print() to printf().
 class SerialClass
 {  
 public:
@@ -212,7 +199,6 @@ private:
 
 
 // ----------------------------------------------------------------------
-
 // This parameter may be used to slow down the software SPI bus speed.
 // This is required when there is a long cable between the PN532 and the Teensy.
 // This delay in microseconds (not milliseconds!) is made between toggeling the CLK line.
