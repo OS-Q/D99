@@ -23,7 +23,7 @@
 //PN532 nfc(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_SS);
 
 // Use this line for a breakout with a hardware SPI connection. 
-PN532 nfc(PN532_SS);
+NFC nfc(PN532_SS);
 
 
 // Or use this line for a breakout or shield with an I2C connection:
