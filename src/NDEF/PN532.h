@@ -1,6 +1,6 @@
 /**************************************************************************/
 /*!
-    @file     NFC.h
+    @file     PN532.h
     @author   Adafruit Industries & Seeed Studio
     @license  BSD
 */
@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include "./PN532Interface.h"
 
-// NFC Commands
+// PN532 Commands
 #define PN532_COMMAND_DIAGNOSE              (0x00)
 #define PN532_COMMAND_GETFIRMWAREVERSION    (0x02)
 #define PN532_COMMAND_GETGENERALSTATUS      (0x04)
@@ -109,14 +109,14 @@
 #define PN532_GPIO_P34                      (4)
 #define PN532_GPIO_P35                      (5)
 
-class NFC
+class PN532
 {
 public:
-    NFC(PN532Interface &interface);
+    PN532(PN532Interface &interface);
 
     void begin(void);
 
-    // Generic NFC functions
+    // Generic PN532 functions
     bool SAMConfig(void);
     uint32_t getFirmwareVersion(void);
     bool writeGPIO(uint8_t pinstate);
@@ -124,7 +124,7 @@ public:
     bool setPassiveActivationRetries(uint8_t maxRetries);
 
     /**
-    * @brief    Init NFC as a target
+    * @brief    Init PN532 as a target
     * @param    timeout max time to wait, 0 means no timeout
     * @return   > 0     success
     *           = 0     timeout

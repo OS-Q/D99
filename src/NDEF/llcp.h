@@ -17,7 +17,7 @@ public:
 	};
 
 	/**
-    * @brief    Actiave NFC as a target
+    * @brief    Actiave PN532 as a target
     * @param    timeout max time to wait, 0 means no timeout
     * @return   > 0     success
     *           = 0     timeout

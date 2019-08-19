@@ -82,7 +82,7 @@ int16_t PN532_I2C::readResponse(uint8_t buf[], uint8_t len, uint16_t timeout)
     do {
         if (_wire->requestFrom(PN532_I2C_ADDRESS, len + 2)) {
             if (read() & 1) {  // check first byte --- status
-                break;         // NFC is ready
+                break;         // PN532 is ready
             }
         }
 
@@ -151,7 +151,7 @@ int8_t PN532_I2C::readAckFrame()
     do {
         if (_wire->requestFrom(PN532_I2C_ADDRESS,  sizeof(PN532_ACK) + 1)) {
             if (read() & 1) {  // check first byte --- status
-                break;         // NFC is ready
+                break;         // PN532 is ready
             }
         }
 

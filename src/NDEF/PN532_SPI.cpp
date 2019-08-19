@@ -20,7 +20,7 @@ void PN532_SPI::begin()
     pinMode(_ss, OUTPUT);
 
     _spi->begin();
-    _spi->setDataMode(SPI_MODE0);  // NFC only supports mode0
+    _spi->setDataMode(SPI_MODE0);  // PN532 only supports mode0
     _spi->setBitOrder(LSBFIRST);
 #if defined __SAM3X8E__
     /** DUE spi library does not support SPI_CLOCK_DIV8 macro */
@@ -156,7 +156,7 @@ bool PN532_SPI::isReady()
 void PN532_SPI::writeFrame(const uint8_t *header, uint8_t hlen, const uint8_t *body, uint8_t blen)
 {
     digitalWrite(_ss, LOW);
-    delay(2);               // wake up NFC
+    delay(2);               // wake up PN532
 
     write(DATA_WRITE);
     write(PN532_PREAMBLE);
