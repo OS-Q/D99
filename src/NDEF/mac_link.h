@@ -3,16 +3,16 @@
 #ifndef __MAC_LINK_H__
 #define __MAC_LINK_H__
 
-#include "./PN532.h"
+#include "./NFC.h"
 
 class MACLink {
 public:
-    MACLink(PN532Interface &interface) : pn532(interface) {
+    MACLink(PN532Interface &interface) : NFC(interface) {
 
     };
     
     /**
-    * @brief    Activate PN532 as a target
+    * @brief    Activate NFC as a target
     * @param    timeout max time to wait, 0 means no timeout
     * @return   > 0     success
     *           = 0     timeout
@@ -41,11 +41,11 @@ public:
     int16_t read(uint8_t *buf, uint8_t len);
 
     uint8_t *getHeaderBuffer(uint8_t *len) {
-        return pn532.getBuffer(len);
+        return NFC.getBuffer(len);
     };
     
 private:
-    PN532 pn532;
+    NFC NFC;
 };
 
 #endif // __MAC_LINK_H__

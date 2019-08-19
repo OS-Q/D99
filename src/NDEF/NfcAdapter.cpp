@@ -2,7 +2,7 @@
 #include "./NfcAdapter.h"
 NfcAdapter::NfcAdapter(PN532Interface &interface)
 {
-    shield = new PN532(interface);
+    shield = new NFC(interface);
 }
 
 NfcAdapter::~NfcAdapter(void)

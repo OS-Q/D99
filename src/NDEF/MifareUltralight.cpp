@@ -11,7 +11,7 @@
 
 #define NFC_FORUM_TAG_TYPE_2 ("NFC Forum Type 2")
 
-MifareUltralight::MifareUltralight(PN532& nfcShield)
+MifareUltralight::MifareUltralight(NFC& nfcShield)
 {
     nfc = &nfcShield;
     ndefStartIndex = 0;

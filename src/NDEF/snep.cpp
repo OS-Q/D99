@@ -5,7 +5,7 @@
 int8_t SNEP::write(const uint8_t *buf, uint8_t len, uint16_t timeout)
 {
 	if (0 >= llcp.activate(timeout)) {
-		DMSG("failed to activate PN532 as a target\n");
+		DMSG("failed to activate NFC as a target\n");
 		return -1;
 	}
 
@@ -55,7 +55,7 @@ int8_t SNEP::write(const uint8_t *buf, uint8_t len, uint16_t timeout)
 int16_t SNEP::read(uint8_t *buf, uint8_t len, uint16_t timeout)
 {
 	if (0 >= llcp.activate(timeout)) {
-		DMSG("failed to activate PN532 as a target\n");
+		DMSG("failed to activate NFC as a target\n");
 		return -1;
 	}
 

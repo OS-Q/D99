@@ -7,7 +7,7 @@
 
 #define MIFARE_CLASSIC ("Mifare Classic")
 
-MifareClassic::MifareClassic(PN532& nfcShield)
+MifareClassic::MifareClassic(NFC& nfcShield)
 {
   _nfcShield = &nfcShield;
 }

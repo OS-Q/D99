@@ -1,7 +1,7 @@
 #ifndef __EMULATETAG_H__
 #define __EMULATETAG_H__
 
-#include "./PN532.h"
+#include "./NFC.h"
 
 #define NDEF_MAX_LENGTH 128  // altough ndef can handle up to 0xfffe in size, arduino cannot.
 typedef enum {COMMAND_COMPLETE, TAG_NOT_FOUND, FUNCTION_NOT_SUPPORTED, MEMORY_FAILURE, END_OF_FILE_BEFORE_REACHED_LE_BYTES} responseCommand;
@@ -9,7 +9,7 @@ typedef enum {COMMAND_COMPLETE, TAG_NOT_FOUND, FUNCTION_NOT_SUPPORTED, MEMORY_FA
 class EmulateTag{
 
 public:
-EmulateTag(PN532Interface &interface) : pn532(interface), uidPtr(0), tagWrittenByInitiator(false), tagWriteable(true), updateNdefCallback(0) { }
+EmulateTag(PN532Interface &interface) : NFC(interface), uidPtr(0), tagWrittenByInitiator(false), tagWriteable(true), updateNdefCallback(0) { }
   
   bool init();
 
@@ -48,7 +48,7 @@ EmulateTag(PN532Interface &interface) : pn532(interface), uidPtr(0), tagWrittenB
   };
 
 private:
-  PN532 pn532;
+  NFC NFC;
   uint8_t ndef_file[NDEF_MAX_LENGTH];
   uint8_t* uidPtr;
   bool tagWrittenByInitiator;

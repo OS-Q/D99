@@ -42,8 +42,8 @@
 typedef enum { NONE, CC, NDEF } tag_file;   // CC ... Compatibility Container
 
 bool EmulateTag::init(){
-  pn532.begin();
-  return pn532.SAMConfig();
+  NFC.begin();
+  return NFC.SAMConfig();
 }
 
 void EmulateTag::setNdefFile(const uint8_t* ndef, const int16_t ndefLength){
@@ -91,7 +91,7 @@ bool EmulateTag::emulate(const uint16_t tgInitAsTargetTimeout){
     memcpy(command + 4, uidPtr, 3);
   }
 
-  if(1 != pn532.tgInitAsTarget(command,sizeof(command), tgInitAsTargetTimeout)){
+  if(1 != NFC.tgInitAsTarget(command,sizeof(command), tgInitAsTargetTimeout)){
     DMSG("tgInitAsTarget failed or timed out!");
     return false;
   }
@@ -123,10 +123,10 @@ bool EmulateTag::emulate(const uint16_t tgInitAsTargetTimeout){
   bool runLoop = true;
 
   while(runLoop){
-    status = pn532.tgGetData(rwbuf, sizeof(rwbuf));
+    status = NFC.tgGetData(rwbuf, sizeof(rwbuf));
     if(status < 0){
       DMSG("tgGetData failed!\n");
-      pn532.inRelease();
+      NFC.inRelease();
       return true;
     }
 
@@ -212,14 +212,14 @@ bool EmulateTag::emulate(const uint16_t tgInitAsTargetTimeout){
       DMSG("\n");
       setResponse(FUNCTION_NOT_SUPPORTED, rwbuf, &sendlen);
     }
-    status = pn532.tgSetData(rwbuf, sendlen);
+    status = NFC.tgSetData(rwbuf, sendlen);
     if(status < 0){
       DMSG("tgSetData failed\n!");
-      pn532.inRelease();
+      NFC.inRelease();
       return true;
     }
   }
-  pn532.inRelease();
+  NFC.inRelease();
   return true;
 }
 
