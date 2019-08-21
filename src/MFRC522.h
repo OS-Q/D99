@@ -1,14 +1,4 @@
 /**
- * MFRC522.h - Library to use ARDUINO RFID MODULE KIT 13.56 MHZ WITH TAGS SPI W AND R BY COOQROBOT.
- * Based on code Dr.Leong   ( WWW.B2CQSHOP.COM )
- * Created by Miguel Balboa (circuitito.com), Jan, 2012.
- * Rewritten by Søren Thing Andersen (access.thing.dk), fall of 2013 (Translation to English, refactored, comments, anti collision, cascade levels.)
- * Extended by Tom Clement with functionality to write to sector 0 of UID changeable Mifare cards.
- * Released into the public domain.
- * 
- * Please read this file for an overview and then MFRC522.cpp for comments on the specific functions.
- * Search for "mf-rc522" on ebay.com to purchase the MF-RC522 board. 
- * 
  * There are three hardware components involved:
  * 1) The micro controller: An Arduino
  * 2) The PCD (short for Proximity Coupling Device): NXP MFRC522 Contactless Reader IC
@@ -72,11 +62,25 @@
  * 		Pages 42-43 Authentication configuration
  * 		Pages 44-47 Authentication key 
  */
-#ifndef MFRC522_h
-#define MFRC522_h
+#ifndef MFRC522_H
+#define MFRC522_H
 
-#include "require_cpp11.h"
-#include "deprecated.h"
+#if __cplusplus < 201103L
+#error "This library needs at least a C++11 compliant compiler, Arduino IDE version >=1.6.6"
+#endif
+
+#ifdef __has_cpp_attribute
+#if __has_cpp_attribute(deprecated)
+#define DEPRECATED [[deprecated]]
+#define DEPRECATED_MSG(msg) [[deprecated(msg)]]
+#endif // __has_cpp_attribute(deprecated)
+#else
+#define DEPRECATED __attribute__((deprecated))
+#define DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
+#endif // __has_cpp_attribute
+
+//#include "require_cpp11.h"
+//#include "deprecated.h"
 // Enable integer limits
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>
