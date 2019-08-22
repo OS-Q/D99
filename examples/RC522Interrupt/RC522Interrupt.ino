@@ -31,7 +31,7 @@ void clearInt(MFRC522 mfrc522);
 /**
  * MFRC522 interrupt serving routine
  */
-inline void ICACHE_RAM_ATTR readCard() {
+void ICACHE_RAM_ATTR readCard() {
   bNewInt = true;
   Serial.print(F("Interrupt. "));
 }
@@ -45,7 +45,7 @@ void setup() {
   SPI.begin();          // Init SPI bus
  
   /* setup the IRQ pin*/
-  pinMode(IRQ_PIN, INPUT);//INPUT_PULLUP
+  pinMode(IRQ_PIN, INPUT_PULLUP);//INPUT_PULLUP
   
   mfrc522.PCD_Init(); // Init MFRC522 card
 
@@ -68,8 +68,8 @@ void setup() {
   bNewInt = false; //interrupt flag
 
   /*Activate the interrupt CHANGE */
-  //attachInterrupt(IRQ_PIN, readCard, FALLING);
-  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
+  attachInterrupt(IRQ_PIN, readCard, FALLING);
+  //attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
 
 //  do { //clear a spourious interrupt at start
 //    ;
