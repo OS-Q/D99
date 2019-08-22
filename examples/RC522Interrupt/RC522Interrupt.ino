@@ -1,13 +1,4 @@
 /**
- * ----------------------------------------------------------------------------
- * Minimal example how to use the interrupts to read the UID of a MIFARE Classic PICC
- * (= card/tag).
- * 
- *   #define IRQ_PIN  16  // Use GPIO PIN D2 as the interrupt pin
-                          // Can't use D0 as it doesn't support Interrupts
-                          // Can't use D3 and D4 as the pin is pulled HIGH which the CC1101
-                          // pulls LOW - connected to FLASH button, boot fails if pulled LOW
- * 
  * Typical pin layout used:
  * -----------------------------------------------------------------------------------------
  *             MFRC522      Arduino       Arduino   Arduino    Arduino          Arduino     Arduino
@@ -52,7 +43,10 @@ void setup() {
   Serial.begin(115200); // Initialize serial communications with the PC
   while (!Serial);      // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
   SPI.begin();          // Init SPI bus
-
+ 
+  /* setup the IRQ pin*/
+  pinMode(IRQ_PIN, INPUT);//INPUT_PULLUP
+  
   mfrc522.PCD_Init(); // Init MFRC522 card
 
   /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
@@ -60,26 +54,27 @@ void setup() {
   byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
   Serial.println(readReg, HEX);
 
-  /* setup the IRQ pin*/
-  pinMode(IRQ_PIN, INPUT);
+
 
   /*
    * Allow the ... irq to be propagated to the IRQ pin
    * For test purposes propagate the IdleIrq and loAlert
    */
+//  regVal = 0x10; //rx irq
+//  mfrc522.PCD_WriteRegister(mfrc522.DivIEnReg, regVal);
   regVal = 0xA0; //rx irq
   mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg, regVal);
 
   bNewInt = false; //interrupt flag
 
-  /*Activate the interrupt*/
-  attachInterrupt(IRQ_PIN, readCard, FALLING);
-  //attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
+  /*Activate the interrupt CHANGE */
+  //attachInterrupt(IRQ_PIN, readCard, FALLING);
+  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
 
 //  do { //clear a spourious interrupt at start
 //    ;
 //  } while (!bNewInt);
-  bNewInt = false;
+  //bNewInt = false;
 
   Serial.println(F("End setup"));
 }
@@ -98,13 +93,13 @@ void loop() {
 
     clearInt(mfrc522);
     mfrc522.PICC_HaltA();
-    //activateRec(mfrc522);
+    activateRec(mfrc522);
     bNewInt = false;
   }
 
   // The receiving block needs regular retriggering (tell the tag it should transmit??)
   // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
-  activateRec(mfrc522);
+  //activateRec(mfrc522);
   delay(100);
 } //loop()
 
