@@ -1,16 +1,7 @@
 /*
  * Library extends MFRC522.h to support RATS for ISO-14443-4 PICC.
- * RATS - Request for Answer To Select.
- * NOTE: Please also check the comments in MFRC522Extended.h
- * @author JPG-Consulting
 */
-
 #include "MFRC522Extended.h"
-
-/////////////////////////////////////////////////////////////////////////////////////
-// Functions for communicating with PICCs
-/////////////////////////////////////////////////////////////////////////////////////
-
 /**
  * Transmits SELECT/ANTICOLLISION commands to select a single PICC.
  * Before calling this function the PICCs must be placed in the READY(*) state by calling PICC_RequestA() or PICC_WakeupA().

@@ -1,8 +1,3 @@
-/**
- * Library extends MFRC522.h to support RATS for ISO-14443-4 PICC.
- * RATS - Request for Answer To Select.
- * @author JPG-Consulting
- */
 #ifndef MFRC522Extended_h
 #define MFRC522Extended_h
 
