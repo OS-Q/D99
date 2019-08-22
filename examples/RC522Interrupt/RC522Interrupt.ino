@@ -31,50 +31,44 @@ void clearInt(MFRC522 mfrc522);
 /**
  * MFRC522 interrupt serving routine
  */
-void ICACHE_RAM_ATTR readCard() {
-  bNewInt = true;
-  Serial.print(F("Interrupt. "));
+void ICACHE_RAM_ATTR readCard(){
+   bNewInt = true;
 }
 
 /**
  * Initialize.
  */
 void setup() {
-  Serial.begin(115200); // Initialize serial communications with the PC
-  while (!Serial);      // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
-  SPI.begin();          // Init SPI bus
- 
-  /* setup the IRQ pin*/
-  pinMode(IRQ_PIN, INPUT_PULLUP);//INPUT_PULLUP
-  
-  mfrc522.PCD_Init(); // Init MFRC522 card
+    Serial.begin(115200); // Initialize serial communications with the PC
+    while (!Serial);    // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
+    SPI.begin();        // Init SPI bus
+    
+    mfrc522.PCD_Init(); // Init MFRC522 card
 
-  /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
-  Serial.print(F("Ver: 0x"));
-  byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
-  Serial.println(readReg, HEX);
+    /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
+    Serial.print("Ver: 0x");      
+    byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
+    Serial.println(readReg, HEX);      
 
+     /* setup the IRQ pin*/ 
+    pinMode(IRQ_PIN, INPUT_PULLUP);
+   
+    /* 
+     *  Allow the ... irq to be propagated to the IRQ pin
+     *  For test purposes propagate the IdleIrq and loAlert
+     */
+    regVal = 0xA0; //rx irq
+    mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg,regVal);
+    
+    bNewInt = false; //interrupt flag
 
-
-  /*
-   * Allow the ... irq to be propagated to the IRQ pin
-   * For test purposes propagate the IdleIrq and loAlert
-   */
-//  regVal = 0x10; //rx irq
-//  mfrc522.PCD_WriteRegister(mfrc522.DivIEnReg, regVal);
-  regVal = 0xA0; //rx irq
-  mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg, regVal);
-
-  bNewInt = false; //interrupt flag
-
-  /*Activate the interrupt CHANGE */
-  attachInterrupt(IRQ_PIN, readCard, FALLING);
-  //attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
-
-//  do { //clear a spourious interrupt at start
-//    ;
-//  } while (!bNewInt);
-  //bNewInt = false;
+    /*Activate the interrupt*/
+    attachInterrupt(IRQ_PIN, readCard, FALLING);
+    
+    /*do{ //clear a spourious interrupt at start
+      ;
+    }while(!bNewInt); */
+    bNewInt = false;
 
   Serial.println(F("End setup"));
 }
@@ -83,24 +77,24 @@ void setup() {
  * Main loop.
  */
 void loop() {
-  if (bNewInt) { //new read interrupt
+   
+   if(bNewInt){  //new read interrupt
+      Serial.print("Interrupt. ");
+      mfrc522.PICC_ReadCardSerial(); //read the tag data
+      // Show some details of the PICC (that is: the tag/card)
+      Serial.print(F("Card UID:"));
+      dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+      Serial.println();
+     
+      clearInt(mfrc522);
+      mfrc522.PICC_HaltA();
+      bNewInt = false;
+   }
 
-    mfrc522.PICC_ReadCardSerial(); //read the tag data
-    // Show some details of the PICC (that is: the tag/card)
-    Serial.print(F("Card UID:"));
-    dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
-    Serial.println();
-
-    clearInt(mfrc522);
-    mfrc522.PICC_HaltA();
-    activateRec(mfrc522);
-    bNewInt = false;
-  }
-
-  // The receiving block needs regular retriggering (tell the tag it should transmit??)
-  // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
-  //activateRec(mfrc522);
-  delay(100);
+// The receiving block needs regular retriggering (tell the tag it should transmit??)
+// (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
+   activateRec(mfrc522);
+   delay(100);
 } //loop()
 
 /**
