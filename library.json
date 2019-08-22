@@ -2,7 +2,7 @@
   "name":"RFID",
   "description":"RFID",
   "keywords":"rfid,nfc",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "authors": {
     "name":  "qitas",
     "email": "qitas@qitas.cn",

@@ -79,8 +79,6 @@
 #define DEPRECATED_MSG(msg) __attribute__((deprecated(msg)))
 #endif // __has_cpp_attribute
 
-//#include "require_cpp11.h"
-//#include "deprecated.h"
 // Enable integer limits
 #define __STDC_LIMIT_MACROS
 #include <stdint.h>

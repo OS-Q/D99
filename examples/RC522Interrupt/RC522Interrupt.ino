@@ -1,12 +1,5 @@
 /**
  * ----------------------------------------------------------------------------
- * This is a MFRC522 library example; see https://github.com/OS-Q/D104
- * for further details and other examples.
- * 
- * NOTE: The library file MFRC522.h has a lot of useful info. Please read it.
- * 
- * Released into the public domain.
- * ----------------------------------------------------------------------------
  * Minimal example how to use the interrupts to read the UID of a MIFARE Classic PICC
  * (= card/tag).
  * 
@@ -28,7 +21,6 @@
  * IRQ         ?            ?             ?         ?          2                10         GPIO-4 | D2 
  * 
  */
-
 #include <SPI.h>
 #include <MFRC522.h>
 
@@ -46,6 +38,14 @@ void activateRec(MFRC522 mfrc522);
 void clearInt(MFRC522 mfrc522);
 
 /**
+ * MFRC522 interrupt serving routine
+ */
+inline void ICACHE_RAM_ATTR readCard() {
+  bNewInt = true;
+  Serial.print(F("Interrupt. "));
+}
+
+/**
  * Initialize.
  */
 void setup() {
@@ -56,7 +56,7 @@ void setup() {
   mfrc522.PCD_Init(); // Init MFRC522 card
 
   /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
-  Serial.print(F("MFRC522 Ver: 0x"));
+  Serial.print(F("Ver: 0x"));
   byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
   Serial.println(readReg, HEX);
 
@@ -73,12 +73,12 @@ void setup() {
   bNewInt = false; //interrupt flag
 
   /*Activate the interrupt*/
-  //attachInterrupt(IRQ_PIN, readCard, FALLING);
-  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
+  attachInterrupt(IRQ_PIN, readCard, FALLING);
+  //attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
 
-  do { //clear a spourious interrupt at start
-    ;
-  } while (!bNewInt);
+//  do { //clear a spourious interrupt at start
+//    ;
+//  } while (!bNewInt);
   bNewInt = false;
 
   Serial.println(F("End setup"));
@@ -89,7 +89,7 @@ void setup() {
  */
 void loop() {
   if (bNewInt) { //new read interrupt
-    Serial.print(F("Interrupt. "));
+
     mfrc522.PICC_ReadCardSerial(); //read the tag data
     // Show some details of the PICC (that is: the tag/card)
     Serial.print(F("Card UID:"));
@@ -98,6 +98,7 @@ void loop() {
 
     clearInt(mfrc522);
     mfrc522.PICC_HaltA();
+    //activateRec(mfrc522);
     bNewInt = false;
   }
 
@@ -115,12 +116,6 @@ void dump_byte_array(byte *buffer, byte bufferSize) {
     Serial.print(buffer[i] < 0x10 ? " 0" : " ");
     Serial.print(buffer[i], HEX);
   }
-}
-/**
- * MFRC522 interrupt serving routine
- */
-void readCard() {
-  bNewInt = true;
 }
 
 /*
