@@ -44,7 +44,7 @@ void setup() {
     SPI.begin();        // Init SPI bus
     
     mfrc522.PCD_Init(); // Init MFRC522 card
-
+    mfrc522.PCD_SetAntennaGain(MFRC522::RxGain_max);
     /* read and printout the MFRC522 version (valid values 0x91 & 0x92)*/
     Serial.print("Ver: 0x");      
     byte readReg = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
