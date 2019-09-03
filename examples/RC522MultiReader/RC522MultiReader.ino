@@ -19,7 +19,7 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
-#define RST_PIN         5          // Configurable, see typical pin layout above
+#define RST_PIN         -1          // Configurable, see typical pin layout above
 
 #define SS_1_PIN        15         // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 2
 #define SS_2_PIN        16          // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 1
