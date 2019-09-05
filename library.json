@@ -1,17 +1,17 @@
 {
   "name":"RFID",
   "description":"RFID",
-  "keywords":"rfid,nfc",
+  "keywords":"rfid,nfc,mfrc522,pn532",
   "version": "1.2.0",
   "authors": {
     "name":  "qitas",
     "email": "qitas@qitas.cn",
-    "url": "http://tang.qitas.cn"
+    "url": "http://arduino.qitas.cn"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/OS-Q/D99.git"
   },
   "frameworks": "arduino",
-  "platforms":"espressif,esp8266,esp32"
+  "platforms":"ststm32,esp8266,esp32"
 }
